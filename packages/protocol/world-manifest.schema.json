@@ -1,0 +1,248 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loa.dev/freeside-world/world-manifest.schema.json",
+  "title": "World Manifest",
+  "description": "Declares a world Entity with its Component attachments. Consumed by packages/registry/bin/generate-tf.ts to emit per-tenant Terraform invocations of loa-freeside/infrastructure/terraform/modules/world/. Schema governance: enum-locked schema_version, additive-only minor bumps, major bumps require new file + migration plan + stable $id (per loa-constructs/.claude/schemas/VERSIONING.md).",
+  "type": "object",
+  "required": ["schema_version", "slug", "name", "repo"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "enum": ["1.0"],
+      "description": "Schema version. Enum-locked per VERSIONING.md."
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,20}$",
+      "description": "World identifier. Matches terraform/modules/world/variables.tf var.name regex (lowercase alphanumeric + hyphens, 2-21 chars). Used as the terraform module instance name and the {slug}.{domain} subdomain."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 2,
+      "description": "Display name for dashboards + the registry UI (Phase 2). Distinct from slug — name carries casing/spacing for humans, slug is the URL-safe handle."
+    },
+    "repo": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+      "description": "GitHub repo in 'OrgName/repo-name' format. Matches terraform/modules/world/variables.tf var.repo. The repo CI uses OIDC role + ECR push from this slot."
+    },
+    "domain": {
+      "type": "string",
+      "description": "Base domain for subdomain routing. Defaults to '0xhoneyjar.xyz' to match terraform module default. Override only when the world lives on a custom apex.",
+      "default": "0xhoneyjar.xyz"
+    },
+    "description": {
+      "type": "string",
+      "description": "One-line description for the registry UI + the docstring at the top of the generated .tf file."
+    },
+    "hosting": {
+      "$ref": "#/$defs/HostingComponent",
+      "description": "Hosting Component — declares where the world runs. Today: ECSHosting on AWS Fargate-Spot. Reserved for VercelHosting / RailwayHosting / MobileBinaryDistribution per ecs-architecture-freeside doctrine."
+    },
+    "identity": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/IdentityComponent" },
+      "description": "Identity Components — credential systems the world accepts. Multiple permitted (e.g., DynamicAuth + SIWEAdmin)."
+    },
+    "env_vars": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Non-secret environment variables. NEXT_PUBLIC_* live here per Next.js convention; they're public-by-design and baked into the client bundle at --build-arg time. Matches terraform/modules/world/variables.tf var.env_vars.",
+      "default": {}
+    },
+    "secrets": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/SecretDeclaration" },
+      "description": "Runtime secrets resolved by ECS from AWS Secrets Manager at task start. Names map to terraform's aws_secretsmanager_secret resources (auto-generated alongside world-{slug}.tf). Values are NEVER in this manifest — populated via load scripts.",
+      "default": []
+    },
+    "compose_with": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ConstructComposition" },
+      "description": "Constructs this world composes-with. Reciprocal — the named construct should appear in this world's grimoire write paths or vice versa. Stage 7 of COSMOGRAPHER's apprenticeship validates this.",
+      "default": []
+    },
+    "network": {
+      "$ref": "#/$defs/NetworkExtras",
+      "description": "Per-world network extras beyond the module's defaults (HTTPS:443, EFS:2049, Finn:3000). Examples: score-api needs RDS:5432; mibera needs broad TCP outbound for Railway Postgres + WebSocket upgrades."
+    },
+    "log_retention_days": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "CloudWatch log retention. Defaults to 30 to match terraform module.",
+      "default": 30
+    },
+    "image_tag": {
+      "type": "string",
+      "description": "Docker image tag pushed to ECR. Defaults to 'latest'. Override for pinned-version deploys.",
+      "default": "latest"
+    },
+    "rooms": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Room" },
+      "description": "Per-world Room declarations (per world-funnel-topology). Reserved for v1.1+ when a Navigation System reads them at runtime. v1.0 accepts but does not consume.",
+      "default": []
+    }
+  },
+  "$defs": {
+    "HostingComponent": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["ECSHosting", "VercelHosting", "RailwayHosting", "MobileBinaryDistribution"],
+          "description": "Hosting Component kind. ECSHosting is the only kind v1.0 generates terraform for; others are reserved for future generators."
+        },
+        "cpu": {
+          "type": "integer",
+          "description": "Fargate CPU units. Defaults to terraform module default (256). Honeyroad uses 512 for Next.js + Sentry build pressure.",
+          "default": 256
+        },
+        "memory": {
+          "type": "integer",
+          "description": "Fargate memory MB. Defaults to terraform module default (512). Honeyroad uses 1024.",
+          "default": 512
+        },
+        "port": {
+          "type": "integer",
+          "description": "Container port the app listens on. Default 3000.",
+          "default": 3000
+        },
+        "desired_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "ECS desired task count. Capped at 1 by the terraform module — SQLite-on-EFS requires single-writer. Use 0 to park a world without destroying.",
+          "default": 1
+        },
+        "health_check_path": {
+          "type": "string",
+          "description": "ALB health check path. Default '/'. Apps with DB-heavy / IO-heavy homepage routes should use a dedicated /api/health endpoint that returns static 200 — '/' renders that hits Supabase or score-api can exceed the 5s container health-check timeout.",
+          "default": "/"
+        },
+        "finn_url": {
+          "type": "string",
+          "description": "Finn AI gateway URL override. Empty string = auto-construct via terraform module default (http://finn.{name_prefix}.local:3000)."
+        }
+      }
+    },
+    "IdentityComponent": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "DynamicAuth",
+            "SIWEAdmin",
+            "SIwTHJAuth",
+            "PasskeyAuth",
+            "SolanaSeedVaultAuth"
+          ],
+          "description": "Identity Component kind per ecs-architecture-freeside doctrine."
+        },
+        "cookie_domain": {
+          "type": "string",
+          "description": "Cookie domain (DynamicAuth). Example: auth.0xhoneyjar.xyz."
+        }
+      }
+    },
+    "SecretDeclaration": {
+      "type": "object",
+      "required": ["key"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Secrets Manager key (lowercase). Generator emits aws_secretsmanager_secret with name 'arrakis/{environment}/worlds/{slug}/{key}' and references the env-var name in the terraform module's secrets={} map. Convention: snake_case in Secrets Manager, SCREAMING_SNAKE_CASE in env."
+        },
+        "env_var": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "description": "Environment variable name as exposed to the running container. Defaults to UPPER(key)."
+        },
+        "lifecycle": {
+          "type": "string",
+          "enum": ["build", "deploy", "runtime"],
+          "description": "When the secret is consumed. 'build' = BuildKit --secret mount in CI (e.g. SENTRY_AUTH_TOKEN). 'deploy' = CI bootstrap. 'runtime' = ECS resolves at task start (default + most common).",
+          "default": "runtime"
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    },
+    "ConstructComposition": {
+      "type": "object",
+      "required": ["slug", "relationship"],
+      "additionalProperties": false,
+      "properties": {
+        "slug": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]+$",
+          "description": "Construct slug as it appears at 0xHoneyJar/construct-{slug}."
+        },
+        "relationship": {
+          "type": "string",
+          "minLength": 10,
+          "description": "Why this world composes with this construct. Reciprocal — the construct should appear in this world's grimoire write paths or vice versa."
+        }
+      }
+    },
+    "NetworkExtras": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "extra_egress_rules": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/SecurityGroupRule" },
+          "description": "Outbound rules beyond the module's defaults. Example: mibera's broad TCP outbound for Railway Postgres + WebSocket upgrades."
+        },
+        "extra_ingress_rules": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/SecurityGroupRule" },
+          "description": "Inbound rules beyond ALB. Rare; example: score-api receives ingress from RDS for the bidirectional rule pair."
+        }
+      }
+    },
+    "SecurityGroupRule": {
+      "type": "object",
+      "required": ["protocol", "from_port", "to_port", "description"],
+      "additionalProperties": false,
+      "properties": {
+        "protocol": { "type": "string", "enum": ["tcp", "udp", "icmp", "-1"] },
+        "from_port": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "to_port": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "cidr_blocks": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Use either cidr_blocks OR source_security_group_ref (mutually exclusive)."
+        },
+        "source_security_group_ref": {
+          "type": "string",
+          "description": "Reference to a security group declared in loa-freeside (e.g. 'aws_security_group.rds.id'). Generator copies verbatim."
+        },
+        "description": { "type": "string", "minLength": 5 }
+      }
+    },
+    "Room": {
+      "type": "object",
+      "required": ["slug", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "slug": { "type": "string", "pattern": "^[a-z][a-z0-9-/]*$" },
+        "kind": {
+          "type": "string",
+          "enum": ["door", "landing", "identity", "depth"],
+          "description": "Room kind per world-funnel-topology. Doors are entry surfaces; Landing is first-touch; Identity rooms are bonding; Depth rooms are replay/build."
+        },
+        "description": { "type": "string" }
+      }
+    }
+  }
+}

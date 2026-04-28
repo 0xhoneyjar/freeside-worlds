@@ -1,0 +1,8 @@
+{
+  "name": "@freeside-world/base-starter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cloneable t=0 world scaffold. Solo SvelteKit + Drizzle + Turso at root; apps/+packages/ slots ready for graduation to multi-app turborepo.",
+  "license": "MIT",
+  "type": "module"
+}

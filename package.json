@@ -1,0 +1,26 @@
+{
+  "name": "freeside-world",
+  "version": "0.1.0",
+  "private": true,
+  "description": "META layer for worlds — creator + base + protocol + registry. Authoring surface + scaffold + sealed schemas + Terraform generator for every world deployed on Freeside.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/0xHoneyJar/freeside-world.git"
+  },
+  "workspaces": [
+    "packages/protocol",
+    "packages/registry",
+    "packages/base/starter",
+    "packages/creator"
+  ],
+  "scripts": {
+    "validate": "bun packages/registry/bin/validate.ts",
+    "generate-tf": "bun packages/registry/bin/generate-tf.ts",
+    "sync-from-tf": "bun packages/registry/bin/sync-from-tf.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.7.0"
+  }
+}

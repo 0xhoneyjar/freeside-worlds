@@ -1,0 +1,18 @@
+schema_version: "1.0"
+slug: rektdrop
+name: "Rektdrop"
+repo: "0xHoneyJar/rektdrop"
+description: "NFT loss calculator + daemon chat (Berachain). First world deployment; template for all subsequent worlds. Issue: 0xHoneyJar/loa-freeside#153."
+
+hosting:
+  type: ECSHosting
+  cpu: 256
+  memory: 512
+
+env_vars:
+  PUBLIC_CHAIN_ID: "80094"
+  PUBLIC_RPC_URL: "https://rpc.berachain.com"
+
+secrets: []
+
+compose_with: []

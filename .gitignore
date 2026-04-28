@@ -1,0 +1,12 @@
+node_modules/
+.DS_Store
+*.log
+dist/
+build/
+
+# Generator output — copied to loa-freeside via cross-repo PR
+packages/registry/tf-out/
+
+# Local dev
+.env
+.env.local

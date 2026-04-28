@@ -1,0 +1,8 @@
+{
+  "name": "@freeside-world/creator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "COSMOGRAPHER's apprenticeship — guides operators through 11 stages of world authoring. Refusal-gated; mirrors construct-creator's CURATOR shape.",
+  "license": "MIT",
+  "type": "module"
+}

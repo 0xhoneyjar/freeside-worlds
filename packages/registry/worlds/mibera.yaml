@@ -1,0 +1,130 @@
+schema_version: "1.0"
+slug: mibera
+name: "Mibera"
+repo: "0xHoneyJar/mibera-honeyroad"
+description: "Honey Road marketplace (Next.js 15.3.8, Berachain). B2 migration 2026-04-16: repo swapped from mibera-world (SvelteKit prototype) to mibera-honeyroad (production Vercel-hosted Next.js). Slug 'mibera' preserved to keep ECR/ALB/Route53 stable across the swap."
+
+hosting:
+  type: ECSHosting
+  # Next.js 15 + Sentry + sharp is heavier than the SvelteKit baseline.
+  cpu: 512
+  memory: 1024
+  # /api/health returns static 200 with no IO. '/' renders marketplace
+  # homepage via DB queries which exceeds the 5s container health-check
+  # timeout on cold cache.
+  health_check_path: "/api/health"
+
+identity:
+  - type: DynamicAuth
+    cookie_domain: "auth.0xhoneyjar.xyz"
+
+env_vars:
+  NEXT_PUBLIC_DYNAMIC_COOKIE_DOMAIN: "auth.0xhoneyjar.xyz"
+
+# 23 runtime secrets. Values populated via scripts/load-honeyroad-secrets.sh
+# (pulls from Vercel env, validates, writes to Secrets Manager). NEXT_PUBLIC_*
+# vars are baked into the client bundle at --build-arg time (public-by-design,
+# not stored as secrets). SENTRY_AUTH_TOKEN is build-time-only via BuildKit
+# --secret mount (never lands in image layer).
+secrets:
+  - key: database_url
+    env_var: DATABASE_URL
+    lifecycle: runtime
+    description: "Drizzle + Railway Postgres (post-Supabase migration)."
+  - key: dynamic_auth_token
+    env_var: DYNAMIC_AUTH_TOKEN
+    lifecycle: runtime
+    description: "Dynamic Labs JWT validation."
+  - key: dynamic_server_api_key
+    env_var: DYNAMIC_SERVER_API_KEY
+    lifecycle: runtime
+    description: "Dynamic Labs server API key."
+  - key: session_secret
+    env_var: SESSION_SECRET
+    lifecycle: runtime
+    description: "iron-session secret."
+  - key: openai_api_key
+    env_var: OPENAI_API_KEY
+    lifecycle: runtime
+    description: "OpenAI (vendor personality)."
+  - key: anthropic_api_key
+    env_var: ANTHROPIC_API_KEY
+    lifecycle: runtime
+    description: "Anthropic (honey-gpt)."
+  - key: dev_wallet_pk
+    env_var: DEV_WALLET_PRIVATE_KEY
+    lifecycle: runtime
+    description: "Wallet signer (admin scripts + runtime)."
+  - key: trigger_secret
+    env_var: TRIGGER_SECRET_KEY
+    lifecycle: runtime
+    description: "Trigger.dev background jobs."
+  - key: twitter_client_id
+    env_var: TWITTER_CLIENT_ID
+    lifecycle: runtime
+    description: "Twitter OAuth (forum account linking)."
+  - key: twitter_client_secret
+    env_var: TWITTER_CLIENT_SECRET
+    lifecycle: runtime
+  - key: discord_client_id
+    env_var: DISCORD_CLIENT_ID
+    lifecycle: runtime
+    description: "Discord OAuth (forum account linking)."
+  - key: discord_client_secret
+    env_var: DISCORD_CLIENT_SECRET
+    lifecycle: runtime
+  - key: cloudinary_key
+    env_var: CLOUDINARY_API_KEY
+    lifecycle: runtime
+    description: "Cloudinary CDN."
+  - key: cloudinary_secret
+    env_var: CLOUDINARY_API_SECRET
+    lifecycle: runtime
+  - key: dune_api_key
+    env_var: DUNE_API_KEY
+    lifecycle: runtime
+    description: "Analytics ingest."
+  - key: quests_api_secret
+    env_var: QUESTS_API_SECRET
+    lifecycle: runtime
+    description: "Internal API gate."
+  - key: vm_api_secret
+    env_var: VM_API_SECRET
+    lifecycle: runtime
+    description: "Internal API gate (VM)."
+  - key: aws_access_key_vm
+    env_var: AWS_ACCESS_KEY_ID_VM
+    lifecycle: runtime
+    description: "AWS S3 (VM avatar/GIF/quiz storage) — access key."
+  - key: aws_secret_key_vm
+    env_var: AWS_SECRET_ACCESS_KEY_VM
+    lifecycle: runtime
+  - key: aws_bucket_name_vm
+    env_var: AWS_BUCKET_NAME_VM
+    lifecycle: runtime
+  - key: aws_region_vm
+    env_var: AWS_REGION_VM
+    lifecycle: runtime
+  - key: allowed_parent_url
+    env_var: ALLOWED_PARENT_URL
+    lifecycle: runtime
+    description: "CSP (frame-ancestors for hub embedding)."
+
+compose_with: []
+
+network:
+  # Default world module egress (HTTPS:443, EFS:2049, Finn:3000) covers most
+  # outbound, but Honey Road also needs:
+  #   - Railway Postgres on port 30555 (non-standard)
+  #   - WebSocket upgrades that may reuse non-443 ports (Trigger.dev,
+  #     Cloudinary, dRPC, Alchemy, OpenAI, Anthropic, WalletConnect,
+  #     Dynamic Labs)
+  # Broad TCP outbound is standard production ECS pattern; security posture
+  # is IAM + secrets + inbound restriction, not egress micromanagement.
+  # Long-term: module accepts egress_mode variable and this rule disappears.
+  extra_egress_rules:
+    - protocol: tcp
+      from_port: 0
+      to_port: 65535
+      cidr_blocks: ["0.0.0.0/0"]
+      description: "Honey Road broad TCP outbound (Railway Postgres:30555 + WebSocket-using external services). Proper fix: module egress_mode variable."

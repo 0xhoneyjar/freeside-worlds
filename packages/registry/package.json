@@ -1,0 +1,21 @@
+{
+  "name": "@freeside-world/registry",
+  "version": "0.1.0",
+  "private": true,
+  "description": "World registry — YAML source-of-truth + terraform generator. The bridge between freeside-world manifests and loa-freeside infrastructure/terraform.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "validate": "bun bin/validate.ts",
+    "generate-tf": "bun bin/generate-tf.ts",
+    "sync-from-tf": "bun bin/sync-from-tf.ts"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "yaml": "^2.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0"
+  }
+}

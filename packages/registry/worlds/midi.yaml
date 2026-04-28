@@ -1,0 +1,48 @@
+schema_version: "1.0"
+slug: midi
+name: "Midi"
+repo: "0xHoneyJar/midi-interface"
+description: "MOB scoring + analytics surface (Next.js 15, Berachain). midi-interface (canonical) + mibera-dimensions deploy to the same Vercel project. Cross-world dependency: calls score-api for ridge plots + leaderboard data."
+
+hosting:
+  type: ECSHosting
+  cpu: 256
+  memory: 512
+  health_check_path: "/api/health"
+
+identity:
+  - type: DynamicAuth
+    cookie_domain: "auth.0xhoneyjar.xyz"
+
+env_vars:
+  NEXT_PUBLIC_DYNAMIC_COOKIE_DOMAIN: "auth.0xhoneyjar.xyz"
+
+# 5 secrets vs honeyroad's 23 — midi is leaner: no Trigger.dev, no Cloudinary,
+# no OAuth, no VM uploads, no Dune, Supabase external. NEXT_PUBLIC_* are
+# baked at --build-arg time (public-by-design, not stored as secrets).
+secrets:
+  - key: dynamic_auth_token
+    env_var: DYNAMIC_AUTH_TOKEN
+    lifecycle: runtime
+    description: "Dynamic Labs server-side token for minified JWT support."
+  - key: supabase_service_role
+    env_var: SUPABASE_SERVICE_ROLE_KEY
+    lifecycle: runtime
+    description: "Supabase service-role key — bypasses RLS for beta allowlist + admin reads."
+  - key: score_api_url
+    env_var: SCORE_API_URL
+    lifecycle: runtime
+    description: "Score API URL (server-side; midi calls into score-api world)."
+  - key: score_api_key
+    env_var: SCORE_API_KEY
+    lifecycle: runtime
+    description: "Score API key (server-side)."
+  - key: signals_api_key
+    env_var: SIGNALS_API_KEY
+    lifecycle: runtime
+    description: "Ruggy signal fan-out (ecosystem intelligence pipeline)."
+
+compose_with: []
+
+# No network extras — default egress (HTTPS+EFS+Finn) covers Supabase, score-api,
+# Berachain RPC, and Signals API (all HTTPS:443).
