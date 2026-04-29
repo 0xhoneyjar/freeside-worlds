@@ -19,15 +19,25 @@ Per [`loa-org-naming-conventions`](https://github.com/0xHoneyJar/loa-hivemind/bl
                                                   │ attached-to
                                                   ▼
               ┌──────────────────────────────────────────────────────────┐
-              │   freeside-* (operational modules attaching to Freeside) │
+              │   freeside-* (installable modules attaching to Freeside) │
               │   ─────────────────────────────────────────────          │
               │   freeside-world      ← THIS REPO                        │
               │       packages/creator    apprenticeship                  │
               │       packages/base       scaffold                        │
               │       packages/protocol   sealed schemas                  │
               │       packages/registry   world manifests + tf generator  │
-              │   freeside-metadata   (sister; net-new same day)          │
-              │   freeside-ruggy      persona-bot                         │
+              │   freeside-score      (sibling — score schemas, scaffolded│
+              │       packages/protocol    NATS events, branded types)    │
+              │       packages/ports       IScoreServiceClient            │
+              │       packages/mcp-tools   agent-callable surface         │
+              │       packages/adapters    typed clients                  │
+              │   freeside-metadata   (stub — NFT metadata + storage)     │
+              │       packages/protocol    (pending design session)       │
+              │   freeside-ruggy      (in flight — zerker authoring)      │
+              │       persona-bot consuming freeside-score schemas        │
+              │                                                            │
+              │   Doctrine: freeside-modules-as-installables               │
+              │   (extends freeside-as-subway)                             │
               └──────────────────────────────────────────────────────────┘
                                                   │ produces
                                                   ▼
@@ -60,10 +70,12 @@ Per [`loa-org-naming-conventions`](https://github.com/0xHoneyJar/loa-hivemind/bl
                                  ┌─────────────────────────────────┐
                                  │   top-level sealed schemas      │
                                  │   ──────────────────────────    │
-                                 │   score-vault (multi-consumer:  │
-                                 │     ruggy + score-api)          │
-                                 │   (precedent only — new schemas │
-                                 │   default to packages/protocol/) │
+                                 │   (precedent: score-vault was   │
+                                 │   proposed; superseded by       │
+                                 │   freeside-score per attachment-│
+                                 │   prefix doctrine. New sealed   │
+                                 │   schemas default to a freeside-│
+                                 │   * module's packages/protocol/.)│
                                  └─────────────────────────────────┘
 ```
 
@@ -74,7 +86,7 @@ Per [`loa-org-naming-conventions`](https://github.com/0xHoneyJar/loa-hivemind/bl
 | prefix | declares | example |
 |---|---|---|
 | `loa-*` | attaches to / is part of the engine layer (L1-L5 of [`sovereign-stack`](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/sovereign-stack.md)) | `loa-finn`, `loa-freeside`, `loa-constructs` |
-| `freeside-*` | operational module that attaches to Freeside (deploy + host + runtime) | `freeside-world`, `freeside-metadata` |
+| `freeside-*` | installable module attaching to Freeside (each owns sealed schemas + adapters; per [`freeside-modules-as-installables`](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/freeside-modules-as-installables.md)) | `freeside-world`, `freeside-score`, `freeside-metadata` |
 | `freeside-{persona}` | persona-bot repo; bot USER name is bare (`@ruggy`) but repo carries the prefix | `freeside-ruggy` |
 | `construct-*` | skill pack repo; slug after dash is the construct identity | `construct-creator`, `construct-the-orchard` |
 | `{world}-*` | per-world apps + tooling | `mibera-honeyroad`, `purupuru-world` |
@@ -103,6 +115,8 @@ The internal structure follows freeside's own sub-package convention: `packages/
 
 ## Cross-references
 
+- [`freeside-modules-as-installables`](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/freeside-modules-as-installables.md) — names the freeside-* family as installable modules; this repo is instance-1
+- [`freeside-as-subway`](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/freeside-as-subway.md) — parent doctrine; modules are subway items
 - [`loa-org-naming-conventions`](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/loa-org-naming-conventions.md) — the locked attachment-prefix doctrine
 - [`world-system-pattern`](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/world-system-pattern.md) — the design that produced this repo
 - [`sovereign-stack`](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/sovereign-stack.md) — L1-L5 stack architecture

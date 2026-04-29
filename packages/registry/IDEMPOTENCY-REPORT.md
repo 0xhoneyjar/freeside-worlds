@@ -1,8 +1,10 @@
 # Idempotency Report — first-pass generator vs live infrastructure
 
-**Date**: 2026-04-28 (initial bootstrap session)
-**Scope**: 5 existing worlds (apdao, mibera, midi, rektdrop, score-api)
-**Verdict**: ⚠️ partial — cosmetic-clean, but **semantic diffs require terraform state migration** before generator output can replace live `.tf` files.
+**Date**: 2026-04-28 (initial bootstrap session; revised same day)
+**Scope**: 4 worlds — apdao, mibera, midi, rektdrop. (`score-api` was reclassified as a service, NOT a world; it now lives as `freeside-score` per [`freeside-modules-as-installables`](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/freeside-modules-as-installables.md). Its idempotency is no longer this repo's concern.)
+**Verdict**: ⚠️ partial — cosmetic-clean, but **semantic diffs require terraform state migration** before generator output can replace live `.tf` files for the 3 multi-secret worlds.
+
+**Note on world vs app distinction (added 2026-04-28 revision)**: per the same doctrine update, several entries below are actually *apps within worlds* rather than standalone worlds. The terraform module deploys per-tenant ECS tasks, which are app-shaped. mibera + midi + rektdrop will eventually nest under their parent world repos (mibera-world, sprawl-world). The current per-deploy YAMLs preserve today's terraform shape; world-app nesting in the registry schema is deferred to a v1.1 follow-up.
 
 This report documents what the generator produces vs what's live in `loa-freeside/infrastructure/terraform/world-{name}.tf` today, and how to get from "partial" to "zero-diff `terraform plan`."
 
@@ -16,9 +18,9 @@ This report documents what the generator produces vs what's live in `loa-freesid
 | rektdrop | ✅ comment + whitespace only | none (subdomain output now matches after fix) | no — clean |
 | midi | ✅ comment + whitespace only | secret naming path | yes — secrets recreated |
 | mibera | ✅ comment + whitespace only | secret naming path + resource address (`mibera` vs `honeyroad`) | yes — secrets recreated + resource rename |
-| score-api | ✅ comment + whitespace only | secret resource pattern (literal vs for_each) + name path + missing secret_string | yes — secret destroyed and recreated WITHOUT VALUE |
+| ~~score-api~~ | (moved out — see freeside-score) | (no longer this repo's concern) | (n/a) |
 
-**apdao + rektdrop are clean.** The other three need migration work before the generator output can be adopted.
+**apdao + rektdrop are clean.** The other two (midi + mibera) need migration work before the generator output can be adopted.
 
 ---
 
@@ -38,40 +40,11 @@ These differences exist between generated and live `.tf`, but produce **zero ter
 
 ## What's NOT idempotent (semantic — would change resource state)
 
-### 1. score-api secret resource pattern (HIGH IMPACT)
+### ~~1. score-api~~ — RECLASSIFIED (resolved 2026-04-28 same day)
 
-**Live** `world-score-api.tf`:
-```hcl
-resource "aws_secretsmanager_secret" "score_api_db_url" {
-  name = "${local.name_prefix}/world-score-api/database-url"
-  ...
-}
-resource "aws_secretsmanager_secret_version" "score_api_db_url" {
-  secret_id     = aws_secretsmanager_secret.score_api_db_url.id
-  secret_string = "postgresql://..." # templated from RDS resources
-}
-```
+`score-api` was reclassified per [`freeside-modules-as-installables`](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/freeside-modules-as-installables.md): it's a service (Hono API impl) and its sealed schemas, not a world. The schemas now belong to `freeside-score`. The `score-api` runtime impl stays at `0xHoneyJar/score-api`.
 
-**Generated** `world-score-api-secrets.tf`:
-```hcl
-resource "aws_secretsmanager_secret" "score_api" {
-  for_each = local.score_api_secrets  # toset(["database_url"])
-  name     = "${local.name_prefix}/worlds/score-api/database_url"
-  ...
-}
-```
-
-**Differences**:
-- Resource address changes: `aws_secretsmanager_secret.score_api_db_url` → `aws_secretsmanager_secret.score_api["database_url"]`
-- Secret name path changes: `world-score-api/database-url` → `worlds/score-api/database_url`
-- Generator does NOT emit `aws_secretsmanager_secret_version` (which contains the templated postgres URL from RDS resources). The schema doesn't model "secret value templated from other terraform resources" — score-api's pattern is unique among the 5 worlds in that the secret VALUE is computed in terraform, not loaded later by a script.
-
-**Resolution path**:
-- Option A: `terraform state mv aws_secretsmanager_secret.score_api_db_url 'aws_secretsmanager_secret.score_api["database_url"]'` + accept new naming convention; manually re-populate the secret_version with the postgres URL.
-- Option B: Add a `secret_value_template` field to the schema for templated values; teach generator to emit `aws_secretsmanager_secret_version` when present. Backward-fits score-api into the canonical pattern.
-- Option C: Keep score-api's `world-score-api.tf` hand-edited; flag as `generator: skip` in the YAML manifest.
-
-**Recommended**: Option B for the schema (additive v1.1 minor bump; field is `templated_value` on `SecretDeclaration`). Land before adopting generator for score-api.
+This finding **stays useful** as a constraint signal for the v1.1 schema: real-world deployments DO have secrets whose values are computed in terraform (RDS-templated postgres URL). When a future world hits the same friction (e.g., a per-world DB with templated connection string), the v1.1 `templated_value` field on `SecretDeclaration` becomes load-bearing. Filed as follow-up in the path-to-zero-diff section below.
 
 ### 2. mibera secret naming convention (MEDIUM IMPACT)
 
@@ -107,14 +80,14 @@ resource "aws_secretsmanager_secret" "score_api" {
 
 ## Path to zero-diff
 
-To get the existing 5 worlds onto the generator without resource recreation:
+To get the existing 4 worlds onto the generator without resource recreation:
 
-1. **schema v1.1 (additive)**: add `templated_value` field on `SecretDeclaration` to model score-api's RDS-templated postgres URL. Add `secrets_resource_alias` for mibera's `honeyroad` legacy name (or migrate).
+1. **schema v1.1 (additive)**: add `templated_value` field on `SecretDeclaration` for future worlds with terraform-computed secret values. Add `secrets_resource_alias` for mibera's `honeyroad` legacy name (or migrate).
 2. **Reconcile name_prefix path style**: confirm whether canonical is `arrakis-${env}/worlds/{slug}/{key}` or `arrakis/${env}/worlds/{slug}/{key}`. Update generator to match.
-3. **One-time terraform state migration** for mibera (honeyroad → mibera resource rename) and score-api (score_api_db_url → score_api["database_url"]).
+3. **One-time terraform state migration** for mibera (honeyroad → mibera resource rename).
 4. **Re-run generator + diff**: cosmetic-only. Adopt as source-of-truth.
 
-Estimated effort: 1-2 days. Tracked as follow-up in the design doc's open questions.
+Estimated effort: 1 day (was 1-2 with score-api; reclassification removed that work from this scope).
 
 ---
 

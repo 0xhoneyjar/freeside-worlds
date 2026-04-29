@@ -4,7 +4,7 @@
 
 This repo houses the system that produces every world deployed onto Freeside. Each existing world (`apdao`, `mibera`, `midi`, `rektdrop`, `score-api`, …) is an **instance**; this repo is the **production system** for instance-N.
 
-Doctrine: [`world-system-pattern`](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/world-system-pattern.md) (instance-N+1 of [`contracts-as-bridges`](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/contracts-as-bridges.md)).
+Doctrine: [`world-system-pattern`](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/world-system-pattern.md) (instance-N+1 of [`contracts-as-bridges`](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/contracts-as-bridges.md)). This repo is instance-1 of [`freeside-modules-as-installables`](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/freeside-modules-as-installables.md) (siblings: `freeside-score`, `freeside-metadata`, `freeside-ruggy`).
 
 ## The four packages
 
