@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://loa.dev/freeside-world/world-manifest.schema.json",
+  "$id": "https://loa.dev/freeside-worlds/world-manifest.schema.json",
   "title": "World Manifest",
   "description": "Declares a world Entity with its Component attachments. Consumed by packages/registry/bin/generate-tf.ts to emit per-tenant Terraform invocations of loa-freeside/infrastructure/terraform/modules/world/. Schema governance: enum-locked schema_version, additive-only minor bumps, major bumps require new file + migration plan + stable $id (per loa-constructs/.claude/schemas/VERSIONING.md).",
   "type": "object",

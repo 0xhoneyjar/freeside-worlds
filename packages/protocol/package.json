@@ -1,5 +1,5 @@
 {
-  "name": "@freeside-world/protocol",
+  "name": "@freeside-worlds/protocol",
   "version": "0.1.0",
   "private": true,
   "description": "Sealed schemas every world consumes. world-manifest.schema.json is the v1.0 contract; loaded by packages/registry generator + future Freeside dashboard.",

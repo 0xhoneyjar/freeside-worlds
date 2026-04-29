@@ -1,4 +1,4 @@
-# Schema Versioning Policy — freeside-world/packages/protocol
+# Schema Versioning Policy — freeside-worlds/packages/protocol
 
 > Imported verbatim from [`loa-constructs/.claude/schemas/VERSIONING.md`](https://github.com/0xHoneyJar/loa-constructs/blob/main/.claude/schemas/VERSIONING.md). One discipline across the org. Adapted only where the file path / consumer set differs.
 
@@ -14,7 +14,7 @@ This is the governance discipline for evolving every schema in this package. Ref
 - **Minor bumps are additive only.** v1.0 documents must validate against v1.1 unchanged.
 - **Major bumps require a migration plan** alongside the schema PR. No silent v1 → v2.
 - The public `$id` URL stays stable across all versions. Major breakage is signaled in `schema_version`, never the URL.
-- **One bridge, two homes.** Schema lives in `freeside-world/packages/protocol`; consumers (registry generator, future Freeside dashboard, future MCP wrappers) reference it.
+- **One bridge, two homes.** Schema lives in `freeside-worlds/packages/protocol`; consumers (registry generator, future Freeside dashboard, future MCP wrappers) reference it.
 
 ---
 
@@ -72,7 +72,7 @@ If unsure, ask: *would any existing valid document fail under the new schema?* I
 These invariants hold for any version of any schema in this package:
 
 1. **The `$id` URL is permanent.** Major versions get a new file, not a moved URL. External consumers cache by URL.
-2. **The schema family stays cohesive in `freeside-world/packages/protocol/`.** No asymmetric extraction. Extraction triggers are documented in `docs/splitting-paths.md`.
+2. **The schema family stays cohesive in `freeside-worlds/packages/protocol/`.** No asymmetric extraction. Extraction triggers are documented in `docs/splitting-paths.md`.
 3. **Schemas describe shape, not narrative.** Prose belongs in YAML `description` fields and Markdown docs, not in validation rules.
 4. **Validation runs at the substrate boundary**, not after work. `bin/validate.ts` validates pre-generation (gate before terraform emission).
 

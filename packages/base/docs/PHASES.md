@@ -119,4 +119,4 @@ A growable world scaffold. One starting point; documented graduation path. No fo
 - **Premature monorepo**: starting at Phase 3 with one app + speculative second. Stay solo until the second app is real.
 - **Premature Phase 4**: adopting Convex before there's any live-state cross-site cohesion to share. Convex is excellent for the right shape; wrong shape is migration debt.
 - **Stuck in Phase 2 forever**: hybrid is transitional. If the second app is working and shared types are growing, complete the migration to Phase 3.
-- **Forking the scaffold**: every world should be able to graduate without forking. If the scaffold doesn't fit, file a PR to `freeside-world/packages/base` rather than diverging.
+- **Forking the scaffold**: every world should be able to graduate without forking. If the scaffold doesn't fit, file a PR to `freeside-worlds/packages/base` rather than diverging.

@@ -1,6 +1,6 @@
 # packages/registry — YAML source-of-truth + terraform generator
 
-The bridge between `freeside-world` world manifests and `loa-freeside` infrastructure/terraform. Every world deployed on Freeside has a corresponding `worlds/{slug}.yaml` here that auto-generates the per-tenant `world-{slug}.tf` + `world-{slug}-secrets.tf` files Terraform consumes.
+The bridge between `freeside-worlds` world manifests and `loa-freeside` infrastructure/terraform. Every world deployed on Freeside has a corresponding `worlds/{slug}.yaml` here that auto-generates the per-tenant `world-{slug}.tf` + `world-{slug}-secrets.tf` files Terraform consumes.
 
 ## Layout
 

@@ -1,8 +1,8 @@
 {
-  "name": "@freeside-world/registry",
+  "name": "@freeside-worlds/registry",
   "version": "0.1.0",
   "private": true,
-  "description": "World registry — YAML source-of-truth + terraform generator. The bridge between freeside-world manifests and loa-freeside infrastructure/terraform.",
+  "description": "World registry — YAML source-of-truth + terraform generator. The bridge between freeside-worlds manifests and loa-freeside infrastructure/terraform.",
   "license": "MIT",
   "type": "module",
   "scripts": {

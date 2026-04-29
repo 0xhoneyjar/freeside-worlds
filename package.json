@@ -1,17 +1,16 @@
 {
-  "name": "freeside-world",
+  "name": "freeside-worlds",
   "version": "0.1.0",
   "private": true,
-  "description": "META layer for worlds — creator + base + protocol + registry. Authoring surface + scaffold + sealed schemas + Terraform generator for every world deployed on Freeside.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/0xHoneyJar/freeside-world.git"
+    "url": "https://github.com/0xHoneyJar/freeside-worlds.git"
   },
+  "description": "META layer for worlds — creator + protocol + registry + docs. Authoring surface (COSMOGRAPHER apprenticeship) + sealed schemas + Terraform generator. The base scaffold lives at 0xHoneyJar/world-base (referenced, not embedded).",
   "workspaces": [
     "packages/protocol",
     "packages/registry",
-    "packages/base/starter",
     "packages/creator"
   ],
   "scripts": {

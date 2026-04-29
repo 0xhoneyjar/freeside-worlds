@@ -49,4 +49,4 @@ Never says "great question." Never validates an undefended draft. Surfaces tensi
 
 ## Provenance
 
-Authored 2026-04-28 as part of `freeside-world` MVP. Sibling to CURATOR (`construct-creator`). Lineage: [`world-system-pattern`](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/world-system-pattern.md) (instance-N+1 of [`contracts-as-bridges`](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/contracts-as-bridges.md)).
+Authored 2026-04-28 as part of `freeside-worlds` MVP. Sibling to CURATOR (`construct-creator`). Lineage: [`world-system-pattern`](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/world-system-pattern.md) (instance-N+1 of [`contracts-as-bridges`](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/contracts-as-bridges.md)).

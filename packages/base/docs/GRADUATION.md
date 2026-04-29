@@ -91,7 +91,7 @@ Per [`mibera-world-consolidation`](https://github.com/0xHoneyJar/loa-hivemind/bl
 
 ### 6. Update terraform manifest (if hosted on Freeside)
 
-If your world's `freeside-world/packages/registry/worlds/<slug>.yaml` declared `repo: 0xHoneyJar/<slug>-honeyroad` (single-app), update to point at the monorepo path:
+If your world's `freeside-worlds/packages/registry/worlds/<slug>.yaml` declared `repo: 0xHoneyJar/<slug>-honeyroad` (single-app), update to point at the monorepo path:
 
 ```yaml
 repo: 0xHoneyJar/<slug>-world  # used to be <slug>-honeyroad
@@ -115,12 +115,12 @@ GitHub Actions workflows under `.github/workflows/` need updating:
 - Use `paths:` filters so unrelated app changes don't trigger every CI job
 - Use turborepo's remote caching for cross-app build skip
 
-### 8. Rerun freeside-world's terraform generator
+### 8. Rerun freeside-worlds's terraform generator
 
 If you updated the registry YAML in step 6:
 
 ```bash
-cd ~/Documents/GitHub/freeside-world
+cd ~/Documents/GitHub/freeside-worlds
 bun run validate <slug>
 bun run generate-tf <slug>
 # open PR to loa-freeside with the new tf-out/world-<slug>.tf

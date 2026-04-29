@@ -1,4 +1,4 @@
-# freeside-world — agent instructions
+# freeside-worlds — agent instructions
 
 This is the META layer for worlds. Four packages: `creator/` (apprenticeship), `base/` (scaffold), `protocol/` (sealed schemas), `registry/` (YAML source-of-truth → terraform generator).
 
@@ -12,7 +12,7 @@ Load this CLAUDE.md when:
 
 ## Hard rules
 
-- **Naming is locked.** `freeside-world` umbrella + `packages/protocol/` schema vocabulary are LOCKED per [`loa-org-naming-conventions`](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/loa-org-naming-conventions.md). Other package names (`creator`, `base`, `registry`) are recommendations from the design doctrine; finalizable during implementation.
+- **Naming is locked.** `freeside-worlds` umbrella + `packages/protocol/` schema vocabulary are LOCKED per [`loa-org-naming-conventions`](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/loa-org-naming-conventions.md). Other package names (`creator`, `base`, `registry`) are recommendations from the design doctrine; finalizable during implementation.
 - **Schema governance imported verbatim from loa-constructs.** Enum-locked `schema_version`, additive-only minor bumps, major bumps require migration plan + new file + stable `$id`.
 - **Idempotency gate**: `bin/generate-tf.ts` MUST produce zero-diff `terraform plan` against `loa-freeside/infrastructure/terraform/world-{name}.tf` for the 5 existing worlds. If the diff is non-zero, the schema is incomplete or the templates are wrong.
 - **Don't push to `loa-freeside` directly.** The registry → terraform pipeline opens a cross-repo PR; humans merge.

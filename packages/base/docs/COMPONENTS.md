@@ -1,8 +1,8 @@
 # Components — Freeside ECS attachment guide
 
-Worlds are **Entities** with attached **Components** ([`ecs-architecture-freeside`](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/ecs-architecture-freeside.md)). The `freeside-world.yaml` manifest in your world's repo (and the `freeside-world/packages/registry/worlds/<slug>.yaml` mirror) declares which Components attach.
+Worlds are **Entities** with attached **Components** ([`ecs-architecture-freeside`](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/ecs-architecture-freeside.md)). The `freeside-worlds.yaml` manifest in your world's repo (and the `freeside-worlds/packages/registry/worlds/<slug>.yaml` mirror) declares which Components attach.
 
-This doc maps Components to terraform behavior + identity setup + payment integration + render targets. Reference for COSMOGRAPHER's Stage 5 (Components decision) in `freeside-world/packages/creator`.
+This doc maps Components to terraform behavior + identity setup + payment integration + render targets. Reference for COSMOGRAPHER's Stage 5 (Components decision) in `freeside-worlds/packages/creator`.
 
 ---
 

@@ -8,11 +8,11 @@ description: COSMOGRAPHER guides operators through authoring a new world as a st
 Use when the operator says:
 - "I want to start a new world for X."
 - "Walk me through scaffolding a world."
-- "I cloned freeside-world/packages/base — what next?"
+- "I cloned freeside-worlds/packages/base — what next?"
 - "Is my world ready to register?"
 
 Do NOT use for:
-- Modifying an existing world's manifest (edit `freeside-world/packages/registry/worlds/<slug>.yaml` directly + re-run `bun run generate-tf`)
+- Modifying an existing world's manifest (edit `freeside-worlds/packages/registry/worlds/<slug>.yaml` directly + re-run `bun run generate-tf`)
 - Authoring a construct (that's `/create-construct` — CURATOR's surface)
 - Scaffolding a blank repo without guidance (`gh repo create` + manual cp)
 
@@ -30,17 +30,17 @@ Stages have states: *waiting*, *active*, *complete*, *needs-revisit*. The operat
 
 | Stage | What COSMOGRAPHER asks | Artifact | Refusal condition |
 |---|---|---|---|
-| 1. **Intent** | "What world are you bringing into being? Who inhabits it? What's the one-noun name?" | `grimoires/freeside-world/drafts/<slug>/intent.md` | Can't articulate world-thesis + first inhabitants + name in one breath ([naming-is-diagnostic](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/naming-is-diagnostic.md)) |
+| 1. **Intent** | "What world are you bringing into being? Who inhabits it? What's the one-noun name?" | `grimoires/freeside-worlds/drafts/<slug>/intent.md` | Can't articulate world-thesis + first inhabitants + name in one breath ([naming-is-diagnostic](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/naming-is-diagnostic.md)) |
 | 2. **Naming** | "Try the world name. The slug. The TLD if you have one. Say them aloud." | Draft slug + repo name + (optional) domain | Generic name (`new-world`, `my-app-world`, `platform`); collision with existing world prefix; collision with `freeside-` namespace |
-| 3. **Scaffold** | "Clone `freeside-world/packages/base/starter`. Show me the result." | New `<slug>-world` repo; initial commit | Starting from scratch; using a non-base scaffold without justification |
-| 4. **Apps decision** | "Solo (apdao-shape) or growable monorepo (mibera/sprawl-shape) — which fits the next 3 months?" | Decision recorded in `<slug>-world/README.md` | Premature monorepo (one app + speculative second); premature solo (two apps already in flight) |
-| 5. **Components** | "Hosting (ECS / Vercel / Railway)? Identity (SIWE / Dynamic / Passkey)? Network extras? See `freeside-world/packages/base/docs/COMPONENTS.md`." | `<slug>-world/freeside-world.yaml` (a draft of the manifest) | Components declared but world-thesis doesn't justify them; required Component missing (e.g., authed app with no Identity declared) |
-| 6. **Protocol declaration** | "What schemas does this world emit / consume? Score (reference `score-vault`)? Per-world types (hoist to `packages/<slug>-protocol/`)? Custom events?" | `<slug>-world/packages/<slug>-protocol/` (or a stub for Phase 1+) | Inline duplicated types where a shared schema exists (e.g., score event payloads — should reference `score-vault`, not duplicate) |
-| 7. **Construct composition** | "Which constructs does this world compose-with? (artisan? observer? gygax? per-world codex?)" | `compose_with:` block in `freeside-world.yaml` | Empty list (bonfire isolation); claimed compositions that don't reciprocate (the construct doesn't appear in the world's grimoire paths) |
-| 8. **Secrets layout** | "What secrets does this world need? Group by lifecycle (build / deploy / runtime)." | `<slug>-world-secrets-spec.md` | Secrets inlined in code; duplicate keys across deploy and runtime; missing `lifecycle` annotation |
-| 9. **Registry entry** | "Author the world entry in `freeside-world/packages/registry/worlds/<slug>.yaml`. Validate." | PR to `freeside-world` with the new YAML | Entry doesn't validate against `world-manifest.schema.json` v1.0 |
-| 10. **Terraform generation** | "Run `bun run generate-tf <slug>` in `freeside-world`. Inspect the diff in `tf-out/`. Open the PR to loa-freeside." | Auto-generated `world-<slug>.tf` (+ `-secrets.tf` if applicable) | Generation produces resource-recreation diff (the schema is incomplete or the templates are wrong) |
-| 11. **Publish + deploy** | "`gh repo create 0xHoneyJar/<slug>-world --public --source . --push`. After freeside-world PR + loa-freeside PR merge, `terraform apply`." | Live world on Freeside; registry PR merged | Skipped earlier stages; deploy without registry entry (orphan world) |
+| 3. **Scaffold** | "Clone [`0xHoneyJar/world-base`](https://github.com/0xHoneyJar/world-base). Show me the result." | New `world-<slug>` repo; initial commit. Use `gh repo create world-<slug> --template 0xHoneyJar/world-base` once world-base is marked Template; manual clone otherwise. | Starting from scratch; using a non-base scaffold without justification; using legacy `<slug>-world` suffix instead of `world-<slug>` prefix |
+| 4. **Apps decision** | "Solo (apdao-shape) or growable monorepo (mibera/sprawl-shape) — which fits the next 3 months?" | Decision recorded in `world-<slug>/README.md` | Premature monorepo (one app + speculative second); premature solo (two apps already in flight) |
+| 5. **Components** | "Hosting (ECS / Vercel / Railway)? Identity (SIWE / Dynamic / Passkey)? Network extras? See `freeside-worlds/packages/base/docs/COMPONENTS.md`." | `world-<slug>/world-manifest.yaml` (a draft of the manifest) | Components declared but world-thesis doesn't justify them; required Component missing (e.g., authed app with no Identity declared) |
+| 6. **Protocol declaration** | "What schemas does this world emit / consume? Score (reference `freeside-score`)? File serving (reference `freeside-filesystem`)? Per-world types (hoist to `packages/<slug>-protocol/`)? Custom events?" | `world-<slug>/packages/<slug>-protocol/` (or a stub for Phase 1+) | Inline duplicated types where a shared schema exists (e.g., score event payloads — should reference `freeside-score`, not duplicate) |
+| 7. **Construct composition** | "Which constructs does this world compose-with? (artisan? observer? gygax? per-world codex?)" | `compose_with:` block in `world-manifest.yaml` | Empty list (bonfire isolation); claimed compositions that don't reciprocate (the construct doesn't appear in the world's grimoire paths) |
+| 8. **Secrets layout** | "What secrets does this world need? Group by lifecycle (build / deploy / runtime)." | `world-<slug>-secrets-spec.md` | Secrets inlined in code; duplicate keys across deploy and runtime; missing `lifecycle` annotation |
+| 9. **Registry entry** | "Author the world entry in `freeside-worlds/packages/registry/worlds/<slug>.yaml`. Validate." | PR to `freeside-worlds` with the new YAML | Entry doesn't validate against `world-manifest.schema.json` v1.0 |
+| 10. **Terraform generation** | "Run `bun run generate-tf <slug>` in `freeside-worlds`. Inspect the diff in `tf-out/`. Open the PR to loa-freeside." | Auto-generated `world-<slug>.tf` (+ `-secrets.tf` if applicable) | Generation produces resource-recreation diff (the schema is incomplete or the templates are wrong) |
+| 11. **Publish + deploy** | "`gh repo create 0xHoneyJar/world-<slug> --public --source . --push`. After freeside-worlds PR + loa-freeside PR merge, `terraform apply`." | Live world on Freeside; registry PR merged | Skipped earlier stages; deploy without registry entry (orphan world) |
 
 Stages 1-2 inherit the [naming-is-diagnostic](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/naming-is-diagnostic.md) refusal rule. Stage 5 grounds the design in [ecs-architecture-freeside](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/ecs-architecture-freeside.md). Stages 9-10 close the loop the implicit registry has been leaving open.
 
@@ -74,7 +74,7 @@ Skills MUST NOT hardcode the Claude Code `AskUserQuestion` call — doing so bre
 Per stage, COSMOGRAPHER emits:
 
 - **Verdict** (primary) — the stage critique. Severity: `info` (stage complete), `low` (refinement suggested), `medium` (revise before advance), `high` (blocker).
-- **Artifact** — the draft file produced by this stage (`intent.md`, updated `freeside-world.yaml`, updated `worlds/<slug>.yaml`).
+- **Artifact** — the draft file produced by this stage (`intent.md`, updated `freeside-worlds.yaml`, updated `worlds/<slug>.yaml`).
 - **Signal** — related threads surfaced (e.g., "sprawl-world's plur app has a similar shape — study it before naming Stage 5").
 
 Example Stage 5 Verdict:
@@ -84,7 +84,7 @@ Example Stage 5 Verdict:
   "stream_type": "Verdict",
   "severity": "medium",
   "glance": "Identity declared but no Identity Component attached",
-  "verdict": "Your draft says 'authed app' in Stage 1 but Stage 5's freeside-world.yaml has no `identity:` block. Either declare the Identity Component (DynamicAuth, SIWEAdmin, etc.) or revise Stage 1's claim that this is an authed surface.",
+  "verdict": "Your draft says 'authed app' in Stage 1 but Stage 5's freeside-worlds.yaml has no `identity:` block. Either declare the Identity Component (DynamicAuth, SIWEAdmin, etc.) or revise Stage 1's claim that this is an authed surface.",
   "evidence": [
     {"lens": "structure", "source": "the-arcade", "note": "ECS Systems require Identity Component to operate AuthSystem"}
   ]
@@ -121,5 +121,5 @@ Example Stage 5 Verdict:
 - Doctrine: [ecs-architecture-freeside](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/ecs-architecture-freeside.md) — Components grounding for Stage 5
 - Doctrine: [world-funnel-topology](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/world-funnel-topology.md) — Doors / Landing / Identity / Depth rooms
 - Sibling skill: `construct-creator/skills/creating-constructs/SKILL.md` — CURATOR's apprenticeship for constructs
-- Companion: `freeside-world/packages/base/docs/{PHASES,GRADUATION,COMPONENTS}.md`
-- Schema: `freeside-world/packages/protocol/world-manifest.schema.json` v1.0 (Stage 9 validates against this)
+- Companion: `freeside-worlds/packages/base/docs/{PHASES,GRADUATION,COMPONENTS}.md`
+- Schema: `freeside-worlds/packages/protocol/world-manifest.schema.json` v1.0 (Stage 9 validates against this)

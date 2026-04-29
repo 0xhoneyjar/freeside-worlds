@@ -1,6 +1,6 @@
 # packages/protocol — sealed schemas every world consumes
 
-The wire-format contracts that bridge `freeside-world` consumers (registry generator, future Freeside dashboard, future MCP wrappers, BUILDER tooling) to a single coherent vocabulary about what a "world" is.
+The wire-format contracts that bridge `freeside-worlds` consumers (registry generator, future Freeside dashboard, future MCP wrappers, BUILDER tooling) to a single coherent vocabulary about what a "world" is.
 
 ## Schemas
 
@@ -31,10 +31,10 @@ See [`VERSIONING.md`](VERSIONING.md). Imported verbatim from `loa-constructs/.cl
 
 ## Consumers
 
-- `freeside-world/packages/registry/bin/validate.ts` — pre-generation gate
-- `freeside-world/packages/registry/bin/generate-tf.ts` — emits terraform
-- `freeside-world/packages/creator/skills/creating-worlds/SKILL.md` — Stage 9 validates a draft against this
+- `freeside-worlds/packages/registry/bin/validate.ts` — pre-generation gate
+- `freeside-worlds/packages/registry/bin/generate-tf.ts` — emits terraform
+- `freeside-worlds/packages/creator/skills/creating-worlds/SKILL.md` — Stage 9 validates a draft against this
 - (future) Freeside dashboard — runtime queries
 - (future) `bin/loa world create` CLI wrapper
 
-When 2+ external repos consume this schema, extraction trigger fires per `docs/splitting-paths.md` (extract to standalone repo `freeside-world-protocol`).
+When 2+ external repos consume this schema, extraction trigger fires per `docs/splitting-paths.md` (extract to standalone repo `freeside-worlds-protocol`).

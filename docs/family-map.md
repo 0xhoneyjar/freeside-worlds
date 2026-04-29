@@ -1,4 +1,4 @@
-# Family Map — where freeside-world fits in the org
+# Family Map — where freeside-worlds fits in the org
 
 Per [`loa-org-naming-conventions`](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/loa-org-naming-conventions.md). This is the visual reference: which prefix declares attachment to which layer.
 
@@ -21,7 +21,7 @@ Per [`loa-org-naming-conventions`](https://github.com/0xHoneyJar/loa-hivemind/bl
               ┌──────────────────────────────────────────────────────────┐
               │   freeside-* (installable modules attaching to Freeside) │
               │   ─────────────────────────────────────────────          │
-              │   freeside-world      ← THIS REPO                        │
+              │   freeside-worlds      ← THIS REPO                        │
               │       packages/creator    apprenticeship                  │
               │       packages/base       scaffold                        │
               │       packages/protocol   sealed schemas                  │
@@ -52,7 +52,7 @@ Per [`loa-org-naming-conventions`](https://github.com/0xHoneyJar/loa-hivemind/bl
                                  │   purupuru-world                │
                                  │   sprawl-world                  │
                                  │   world-template (archived →    │
-                                 │     freeside-world/packages/base)│
+                                 │     freeside-worlds/packages/base)│
                                  └─────────────────────────────────┘
 
                                  ┌─────────────────────────────────┐
@@ -86,14 +86,14 @@ Per [`loa-org-naming-conventions`](https://github.com/0xHoneyJar/loa-hivemind/bl
 | prefix | declares | example |
 |---|---|---|
 | `loa-*` | attaches to / is part of the engine layer (L1-L5 of [`sovereign-stack`](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/sovereign-stack.md)) | `loa-finn`, `loa-freeside`, `loa-constructs` |
-| `freeside-*` | installable module attaching to Freeside (each owns sealed schemas + adapters; per [`freeside-modules-as-installables`](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/freeside-modules-as-installables.md)) | `freeside-world`, `freeside-score`, `freeside-metadata` |
+| `freeside-*` | installable module attaching to Freeside (each owns sealed schemas + adapters; per [`freeside-modules-as-installables`](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/freeside-modules-as-installables.md)) | `freeside-worlds`, `freeside-score`, `freeside-metadata` |
 | `freeside-{persona}` | persona-bot repo; bot USER name is bare (`@ruggy`) but repo carries the prefix | `freeside-ruggy` |
 | `construct-*` | skill pack repo; slug after dash is the construct identity | `construct-creator`, `construct-the-orchard` |
 | `{world}-*` | per-world apps + tooling | `mibera-honeyroad`, `purupuru-world` |
 
 ---
 
-## Why freeside-world picks this prefix
+## Why freeside-worlds picks this prefix
 
 The repo holds the system that **produces** worlds for Freeside. It doesn't ship as part of the Loa engine itself; it doesn't ship as a per-world app; it doesn't ship as a reusable construct. It's an operational module that attaches to Freeside — same as `freeside-metadata`, same shape as future `freeside-payment` or `freeside-observability` modules.
 
@@ -107,7 +107,7 @@ The internal structure follows freeside's own sub-package convention: `packages/
 
 | Repo | Family | Notes |
 |---|---|---|
-| `world-template` | (legacy) | Solo-world starter. Being absorbed into `freeside-world/packages/base/` (migration step 8). After absorption: archived with redirect. |
+| `world-template` | (legacy) | Solo-world starter. Being absorbed into `freeside-worlds/packages/base/` (migration step 8). After absorption: archived with redirect. |
 | `mibera-codex` | `mibera-*` (per-world) | Lore + per-token codex; lives in mibera world's codex tooling. Not a freeside-* attachment. |
 | `mibera-contracts` | `mibera-*` | Smart contracts. Per-world; not freeside-attached. |
 

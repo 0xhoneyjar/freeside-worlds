@@ -30,7 +30,7 @@ When the operator invokes `/create-world`, COSMOGRAPHER:
 ## What it does NOT do
 
 - Install/manage existing worlds (use the registry PR workflow directly)
-- Modify an existing world's manifest (edit `freeside-world/packages/registry/worlds/<slug>.yaml` + re-run `bun run generate-tf`)
+- Modify an existing world's manifest (edit `freeside-worlds/packages/registry/worlds/<slug>.yaml` + re-run `bun run generate-tf`)
 - Author constructs (that's CURATOR / `construct-creator` / `/create-construct`)
 
 ## Composition
@@ -48,6 +48,6 @@ Same five-lens taste stack as CURATOR:
 
 ## Provenance
 
-- Authored 2026-04-28 as part of `freeside-world` MVP
+- Authored 2026-04-28 as part of `freeside-worlds` MVP
 - Sibling to CURATOR (museum-curator metaphor extended to world-authoring)
 - Lineage: [world-system-pattern](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/world-system-pattern.md) (instance-N+1 of [contracts-as-bridges](https://github.com/0xHoneyJar/loa-hivemind/blob/main/wiki/concepts/contracts-as-bridges.md))
