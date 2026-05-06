@@ -9,8 +9,8 @@
   "properties": {
     "schema_version": {
       "type": "string",
-      "enum": ["1.0", "1.1"],
-      "description": "Schema version. Enum-locked per VERSIONING.md. v1.1 (cycle-Q · 2026-05-04) adds optional `quest_namespace` + `quest_engine_config` + `guild_ids` fields for Quest UI Substrate composition. v1.0 documents validate unchanged."
+      "enum": ["1.0", "1.1", "1.2"],
+      "description": "Schema version. Enum-locked per VERSIONING.md. v1.1 (cycle-Q · 2026-05-04) adds optional `quest_namespace` + `quest_engine_config` + `guild_ids` fields for Quest UI Substrate composition. v1.2 (cycle-B · 2026-05-05) adds optional `tenant_id` + `auth` fields for the convergence-spine identity overlay (freeside-auth). v1.0/v1.1 documents validate unchanged."
     },
     "slug": {
       "type": "string",
@@ -100,6 +100,15 @@
         "pattern": "^\\d{17,20}$"
       },
       "description": "v1.1 (cycle-Q): Discord guild snowflakes that this world owns. Read by `freeside-characters/apps/bot/src/world-resolver.ts` for per-guild → per-world resolution (multi-tenant single-bot routing). Per PRD D5 + SDD §7.1. OPTIONAL — worlds without Discord presence omit. May overlap with other worlds for shared guilds (first-match wins)."
+    },
+    "tenant_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]+$",
+      "description": "v1.2 (cycle-B · convergence-spine): canonical tenant identifier consumed by `@freeside-auth/engine` (per-tenant TenantAdapter dispatch · `dynamic_users ↔ midi_profiles` join for mibera · `profiles.address+sol_address` for cubquest · etc). Distinct from `slug` (terraform world handle) and `quest_namespace` (per-quest collection key) — `tenant_id` is the IDENTITY axis. Bot's `world-resolver.resolveTenantFromGuild()` returns this value · feeds `auth-bridge.attachAuthContext()`. Per SDD §3 + §12.4. OPTIONAL — worlds without identity composition omit."
+    },
+    "auth": {
+      "$ref": "#/$defs/AuthConfig",
+      "description": "v1.2 (cycle-B · convergence-spine): per-world auth backend declaration. `freeside-jwt` opts into the freeside-auth verified path (JWT minted by orchestrator · signed by loa-freeside/apps/gateway · verified at consumer via `@freeside-auth/adapters/jwks-validator`). `anon` keeps the world on the cycle-Q anon-default path. Composes orthogonally with the bot's `AUTH_BACKEND` env (Lock-7 · env wins as kill switch). OPTIONAL — defaults to anon when omitted."
     }
   },
   "$defs": {
@@ -259,6 +268,19 @@
           "description": "Room kind per world-funnel-topology. Doors are entry surfaces; Landing is first-touch; Identity rooms are bonding; Depth rooms are replay/build."
         },
         "description": { "type": "string" }
+      }
+    },
+    "AuthConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backend"],
+      "description": "v1.2 (cycle-B): per-world auth backend declaration. Sealed shape · additive minor bumps allowed.",
+      "properties": {
+        "backend": {
+          "type": "string",
+          "enum": ["anon", "freeside-jwt"],
+          "description": "Auth backend the world has opted into. `anon` keeps cycle-Q anon-default (no JWT minted at session-start). `freeside-jwt` activates the verified path (JWT minted by `@freeside-auth/engine` orchestrator · signed by loa-freeside/apps/gateway · verified at consumer)."
+        }
       }
     },
     "QuestEngineConfig": {
