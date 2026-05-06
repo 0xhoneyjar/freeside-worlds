@@ -6,6 +6,24 @@
   "type": "object",
   "required": ["schema_version", "slug", "name", "repo"],
   "additionalProperties": false,
+  "allOf": [
+    {
+      "description": "v1.2 (cycle-B): cross-field constraint · auth.backend='freeside-jwt' requires tenant_id (the orchestrator dispatches per-tenant TenantAdapter via tenant_id; declaring freeside-jwt without tenant_id is invalid at runtime). Bridgebuilder MEDIUM finding (PR #2 conf 0.85) — surfaced as schema-level rejection rather than runtime-only failure.",
+      "if": {
+        "properties": {
+          "auth": {
+            "type": "object",
+            "properties": { "backend": { "const": "freeside-jwt" } },
+            "required": ["backend"]
+          }
+        },
+        "required": ["auth"]
+      },
+      "then": {
+        "required": ["tenant_id"]
+      }
+    }
+  ],
   "properties": {
     "schema_version": {
       "type": "string",

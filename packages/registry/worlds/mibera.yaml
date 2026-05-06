@@ -22,13 +22,19 @@ quest_engine_config:
   questAcceptanceMode: "auth-required"
   submissionStyle: "inline_thread"
   positiveFrictionDelayMs: 12000
-guild_ids:
-  # Operator confirms the production mibera Discord guild snowflake post
-  # B-1.5 gateway deploy. Until then the bot's index.ts injects DISCORD_GUILD_ID
-  # at runtime via the production-mode constructor (cycle-B B-1.8).
-  # Placeholder snowflake during cycle-B substrate work · operator replaces
-  # before flipping AUTH_BACKEND=freeside-jwt on Railway env.
-  - "111111111111111111"
+guild_ids: []
+# guild_ids intentionally empty until operator confirms the production
+# mibera Discord guild snowflake post B-1.5 gateway deploy. The bot's
+# index.ts (cycle-B B-1.8) reads DISCORD_GUILD_ID at runtime via the
+# production-mode constructor; this list becomes the manifest source-of-truth
+# once the operator commits the canonical snowflake.
+#
+# Cross-reviewer convergence (flatline IMP-004 score 810 + bridgebuilder
+# HIGH conf 0.75 · PR #2): a placeholder snowflake `111111111111111111`
+# would pass the schema regex but silently mis-route auth if any consumer
+# trusted the manifest before operator replacement. Empty list + comment
+# is the fail-safe: world-resolver returns null for every guild · auth-bridge
+# emits anon-fallback (audited) until the canonical snowflake lands.
 
 # Auth backend: opts the world into the freeside-auth verified path.
 # Composes orthogonally with the bot binary's AUTH_BACKEND env (Lock-7
