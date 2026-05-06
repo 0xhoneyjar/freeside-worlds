@@ -1,8 +1,48 @@
-schema_version: "1.0"
+schema_version: "1.2"
 slug: mibera
 name: "Mibera"
 repo: "0xHoneyJar/mibera-honeyroad"
-description: "Honey Road marketplace (Next.js 15.3.8, Berachain). B2 migration 2026-04-16: repo swapped from mibera-world (SvelteKit prototype) to mibera-honeyroad (production Vercel-hosted Next.js). Slug 'mibera' preserved to keep ECR/ALB/Route53 stable across the swap."
+description: "Honey Road marketplace (Next.js 15.3.8, Berachain). B2 migration 2026-04-16: repo swapped from mibera-world (SvelteKit prototype) to mibera-honeyroad (production Vercel-hosted Next.js). Slug 'mibera' preserved to keep ECR/ALB/Route53 stable across the swap. Cycle-B 2026-05-05: schema bumped 1.0 → 1.2 to add identity/quest convergence fields (tenant_id, auth, quest_namespace, quest_engine_config, guild_ids)."
+
+# ─── cycle-B convergence-spine (2026-05-05 · slice-B B-1.12) ──────────
+# Identity overlay: mibera world maps to the `mibera` tenant in
+# @freeside-auth/engine. The TenantAdapter for this tenant is
+# postgres-split (see freeside-auth/packages/engine/tenants.yaml) ·
+# dynamic_users.dynamic_user_id ↔ midi_profiles.dynamic_user_id join.
+# Bot's world-resolver.resolveTenantFromGuild() returns 'mibera' for
+# any of the guild_ids below.
+tenant_id: mibera
+
+# Quest UI substrate: per-PRD D5 mongolian quest namespace; per-PRD D4
+# default acceptance mode is open-badge-gated (anon accept · verified
+# badge issuance only). cycle-B B-1 ships Munkh's mongolian quest as
+# the first cartridge in this namespace.
+quest_namespace: mongolian
+quest_engine_config:
+  questAcceptanceMode: "auth-required"
+  submissionStyle: "inline_thread"
+  positiveFrictionDelayMs: 12000
+guild_ids: []
+# guild_ids intentionally empty until operator confirms the production
+# mibera Discord guild snowflake post B-1.5 gateway deploy. The bot's
+# index.ts (cycle-B B-1.8) reads DISCORD_GUILD_ID at runtime via the
+# production-mode constructor; this list becomes the manifest source-of-truth
+# once the operator commits the canonical snowflake.
+#
+# Cross-reviewer convergence (flatline IMP-004 score 810 + bridgebuilder
+# HIGH conf 0.75 · PR #2): a placeholder snowflake `111111111111111111`
+# would pass the schema regex but silently mis-route auth if any consumer
+# trusted the manifest before operator replacement. Empty list + comment
+# is the fail-safe: world-resolver returns null for every guild · auth-bridge
+# emits anon-fallback (audited) until the canonical snowflake lands.
+
+# Auth backend: opts the world into the freeside-auth verified path.
+# Composes orthogonally with the bot binary's AUTH_BACKEND env (Lock-7
+# kill switch). When env=anon, the bridge short-circuits regardless of
+# this declaration; when env=freeside-jwt, this declaration determines
+# whether the world's interactions get verified JWTs or stay anon.
+auth:
+  backend: "freeside-jwt"
 
 hosting:
   type: ECSHosting
@@ -110,7 +150,15 @@ secrets:
     lifecycle: runtime
     description: "CSP (frame-ancestors for hub embedding)."
 
-compose_with: []
+compose_with:
+  # cycle-B sprint-1 B-1.12: explicit composition with the identity
+  # overlay + quest substrate. Both modules are L4 installables this
+  # world consumes via published peerDependencies + sealed schemas
+  # (per [[freeside-modules-as-installables]]).
+  - slug: freeside-auth
+    relationship: "Identity overlay · postgres-split TenantAdapter dispatches dynamic_users ↔ midi_profiles join · JWT mint orchestrator delegates signing to loa-freeside/apps/gateway. Reciprocal: freeside-auth/packages/engine/tenants.yaml declares mibera entry."
+  - slug: freeside-quests
+    relationship: "Quest UI substrate · @0xhoneyjar/quests-engine ships AuthCheckPort + QuestStatePort · Sietch Layer (cycle-B B-1.9) verifies JWT minted by freeside-auth · per-tenant Pg pool wired by bot composition (cycle-B B-1.8). Reciprocal: freeside-quests/packages/engine/src/auth/sietch.ts asserts claims.tenant === expected_tenant for this world."
 
 network:
   # Default world module egress (HTTPS:443, EFS:2049, Finn:3000) covers most
