@@ -14,7 +14,8 @@ import {
   type WriteInput,
   type WriteResult,
 } from '../src/index.js';
-import type { VerifyMessageConfig } from '@freeside-worlds/config-protocol';
+import type { VerifyMessageConfig, RoleMapConfig } from '@freeside-worlds/config-protocol';
+import { KNOWN_SURFACES } from '@freeside-worlds/config-protocol';
 
 /**
  * Test-local in-memory ConfigStore. Deliberately NOT imported from
@@ -410,5 +411,210 @@ describe('ConfigService — per-world isolation', () => {
     const a = await service.getConfig('apdao', 'verify-message');
     expect(m!.version).toBe(2);
     expect(a!.version).toBe(1);
+  });
+});
+
+// ─── role-map surface (Track 2 P1): the CM-editable tier→Discord-role map ──
+//
+// Mirrors the verify-message fixtures: a valid payload decodes and writes; the
+// BLOCKER-1 write-side defenses (excess key, control byte in a CM-editable
+// label, the bounded color grammar) reject before any store mutation. The
+// rungs cap (≤25) and the discordRoleId snowflake grammar are role-map's own
+// invariants. Grounded against freeside-dashboard `_data/roles-shared.ts`
+// TierDef (id/label/gate/color); `gate` is the contract-layer numeric score
+// threshold (the dashboard renders its plain-language gate string for humans).
+
+// A valid role-map: two rungs, one BOUND to a Discord role, one UNBOUND
+// (discordRoleId omitted — "no role assignment for this tier yet").
+const validRoleMap: RoleMapConfig = {
+  enabled: true,
+  rungs: [
+    {
+      id: 'godfather',
+      label: 'Godfather',
+      color: 'oklch(0.70 0.13 70)', // dashboard ladders carry oklch …
+      gate: 90,
+      discordRoleId: '123456789012345678', // … and bind a real snowflake.
+    },
+    {
+      id: 'curious',
+      label: 'Curious',
+      color: '#C2B280', // … or hex — same bounded grammar accent colors use.
+      gate: 0, // floor tier, UNBOUND (discordRoleId omitted).
+    },
+  ],
+};
+
+describe('role-map surface — registration', () => {
+  test("'role-map' is a KNOWN_SURFACES member alongside 'verify-message'", () => {
+    expect(KNOWN_SURFACES).toContain('role-map');
+    expect(KNOWN_SURFACES).toContain('verify-message');
+  });
+});
+
+describe('role-map surface — valid decode + write', () => {
+  test('a valid role-map (one bound rung, one unbound) creates at version 1', async () => {
+    const { service, store } = newService();
+    const ok = await service.putConfig('mibera', 'role-map', validRoleMap, 0, 'cm:alice');
+    expect(ok.version).toBe(1);
+    expect(ok.envelope.surface).toBe('role-map');
+    const cfg = ok.envelope.config as RoleMapConfig;
+    expect(cfg.rungs).toHaveLength(2);
+    expect(cfg.rungs[0]!.discordRoleId).toBe('123456789012345678'); // bound
+    expect(cfg.rungs[1]!.discordRoleId).toBeUndefined(); // unbound is valid
+
+    const hist = store._history('mibera', 'role-map');
+    expect(hist).toHaveLength(1);
+    expect(hist[0]!.action).toBe('CREATE');
+  });
+
+  test('a rung MAY omit discordRoleId (unbound tier) — accepted', async () => {
+    const { service } = newService();
+    const allUnbound: RoleMapConfig = {
+      enabled: false,
+      rungs: [{ id: 'lurker', label: 'lurker', color: '#888', gate: 0 }],
+    };
+    const ok = await service.putConfig('henlo', 'role-map', allUnbound, 0, 'cm:alice');
+    expect(ok.version).toBe(1);
+  });
+
+  test('exactly 25 rungs (the cap) is accepted', async () => {
+    const { service } = newService();
+    const atCap: RoleMapConfig = {
+      enabled: true,
+      rungs: Array.from({ length: 25 }, (_, i) => ({
+        id: `tier-${i}`,
+        label: `Tier ${i}`,
+        color: '#ffffff',
+        gate: i,
+      })),
+    };
+    const ok = await service.putConfig('sietch', 'role-map', atCap, 0, 'cm:alice');
+    expect(ok.version).toBe(1);
+  });
+});
+
+describe('role-map surface — fail-closed validation (BLOCKER-1 + own invariants)', () => {
+  test('rejects an excess (unknown) key on a rung — closed slot-schema', async () => {
+    const { service, store } = newService();
+    const withRogueKey = {
+      enabled: true,
+      rungs: [{ id: 'x', label: 'X', color: '#fff', gate: 1, bogus: 'inject' }],
+    } as unknown as RoleMapConfig;
+    await expect(
+      service.putConfig('mibera', 'role-map', withRogueKey, 0, 'cm:alice'),
+    ).rejects.toBeInstanceOf(ConfigValidationError);
+    expect(await store.getCurrent('mibera', 'role-map')).toBeNull();
+  });
+
+  test('rejects a control byte (NUL) in a rung label', async () => {
+    const { service, store } = newService();
+    const sneaky = {
+      enabled: true,
+      // U+0000 embedded in the display label.
+      rungs: [{ id: 'x', label: `God${String.fromCharCode(0)}father`, color: '#fff', gate: 1 }],
+    } as unknown as RoleMapConfig;
+    await expect(
+      service.putConfig('mibera', 'role-map', sneaky, 0, 'cm:alice'),
+    ).rejects.toBeInstanceOf(ConfigValidationError);
+    expect(await store.getCurrent('mibera', 'role-map')).toBeNull();
+  });
+
+  test('rejects a zero-width character (U+200B) in a rung label', async () => {
+    const { service } = newService();
+    const sneaky = {
+      enabled: true,
+      rungs: [{ id: 'x', label: `God${String.fromCharCode(0x200b)}father`, color: '#fff', gate: 1 }],
+    } as unknown as RoleMapConfig;
+    await expect(
+      service.putConfig('mibera', 'role-map', sneaky, 0, 'cm:alice'),
+    ).rejects.toBeInstanceOf(ConfigValidationError);
+  });
+
+  test('rejects a label longer than the 60-char cap', async () => {
+    const { service } = newService();
+    const overlong = {
+      enabled: true,
+      rungs: [{ id: 'x', label: 'L'.repeat(61), color: '#fff', gate: 1 }],
+    } as unknown as RoleMapConfig;
+    await expect(
+      service.putConfig('mibera', 'role-map', overlong, 0, 'cm:alice'),
+    ).rejects.toBeInstanceOf(ConfigValidationError);
+  });
+
+  test('rejects a control byte hidden in the color value (bounded color grammar)', async () => {
+    const { service } = newService();
+    const sneaky = {
+      enabled: true,
+      rungs: [{ id: 'x', label: 'X', color: `#ff${String.fromCharCode(0x1b)}f`, gate: 1 }],
+    } as unknown as RoleMapConfig;
+    await expect(
+      service.putConfig('mibera', 'role-map', sneaky, 0, 'cm:alice'),
+    ).rejects.toBeInstanceOf(ConfigValidationError);
+  });
+
+  test('rejects a bad tier id grammar (uppercase / underscore not in [a-z0-9-])', async () => {
+    const { service } = newService();
+    const badId = {
+      enabled: true,
+      rungs: [{ id: 'Bad_ID', label: 'X', color: '#fff', gate: 1 }],
+    } as unknown as RoleMapConfig;
+    await expect(
+      service.putConfig('mibera', 'role-map', badId, 0, 'cm:alice'),
+    ).rejects.toBeInstanceOf(ConfigValidationError);
+  });
+
+  test('rejects a negative gate (score threshold must be ≥ 0)', async () => {
+    const { service } = newService();
+    const negGate = {
+      enabled: true,
+      rungs: [{ id: 'x', label: 'X', color: '#fff', gate: -1 }],
+    } as unknown as RoleMapConfig;
+    await expect(
+      service.putConfig('mibera', 'role-map', negGate, 0, 'cm:alice'),
+    ).rejects.toBeInstanceOf(ConfigValidationError);
+  });
+
+  test('rejects a non-numeric discordRoleId (snowflake must be [0-9]+)', async () => {
+    const { service } = newService();
+    const badRole = {
+      enabled: true,
+      rungs: [{ id: 'x', label: 'X', color: '#fff', gate: 1, discordRoleId: 'role-1' }],
+    } as unknown as RoleMapConfig;
+    await expect(
+      service.putConfig('mibera', 'role-map', badRole, 0, 'cm:alice'),
+    ).rejects.toBeInstanceOf(ConfigValidationError);
+  });
+
+  test('rejects a rungs array over the 25-rung cap', async () => {
+    const { service, store } = newService();
+    const tooMany = {
+      enabled: true,
+      rungs: Array.from({ length: 26 }, (_, i) => ({
+        id: `tier-${i}`,
+        label: `Tier ${i}`,
+        color: '#fff',
+        gate: i,
+      })),
+    } as unknown as RoleMapConfig;
+    await expect(
+      service.putConfig('mibera', 'role-map', tooMany, 0, 'cm:alice'),
+    ).rejects.toBeInstanceOf(ConfigValidationError);
+    expect(await store.getCurrent('mibera', 'role-map')).toBeNull();
+  });
+});
+
+describe('role-map surface — per-surface isolation from verify-message', () => {
+  test('a world can hold BOTH a verify-message and a role-map head independently', async () => {
+    const { service } = newService();
+    await service.putConfig('mibera', 'verify-message', validConfig, 0, 'cm:alice');
+    await service.putConfig('mibera', 'role-map', validRoleMap, 0, 'cm:alice');
+
+    const vm = await service.getConfig('mibera', 'verify-message');
+    const rm = await service.getConfig('mibera', 'role-map');
+    expect(vm!.version).toBe(1);
+    expect(rm!.version).toBe(1);
+    expect(vm!.envelope.surface).toBe('verify-message');
+    expect(rm!.envelope.surface).toBe('role-map');
   });
 });

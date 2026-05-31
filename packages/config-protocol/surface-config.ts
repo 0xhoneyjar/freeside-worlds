@@ -253,21 +253,116 @@ export const VerifyMessageConfig = S.Struct({
 });
 export type VerifyMessageConfig = S.Schema.Type<typeof VerifyMessageConfig>;
 
+// ─── role-map surface (Track 2 P1): the CM-editable tier→Discord-role map ──
+
+/**
+ * Field-specific caps for the role-map surface. A tier `id` is a stable
+ * slug-ish key (NOT free copy) — capped much tighter than a display string and
+ * grammar-locked to `[a-z0-9-]`. A `label` is the CM-editable display name, so
+ * it inherits the same BLOCKER-1 NonEmptyBounded + control-byte-reject defense
+ * as VerifyMessageCopy.title (capped ~60). The `gate` and `discordRoleId` caps
+ * follow below at their fields.
+ */
+const TIER_ID_MAX = 40;
+const TIER_LABEL_MAX = 60;
+const DISCORD_ROLE_ID_MAX = 20;
+const ROLE_MAP_RUNGS_MAX = 25;
+
+/**
+ * A stable tier id — a bounded slug. Grammar-locked to `[a-z0-9-]` so the id
+ * stays a safe key (URL/JSON/config-key safe), 1–40 chars, non-empty. Distinct
+ * from `label`: the id is the wire key the bot side (P4) joins on; the label is
+ * the human display name. The dashboard's hardcoded ladders use exactly this
+ * id shape (`godfather`, `all_night`, `naib`, …) — see freeside-dashboard
+ * `_data/roles-shared.ts` `TierDef.id`.
+ */
+const TierId = S.String.pipe(
+  S.minLength(1),
+  S.maxLength(TIER_ID_MAX),
+  S.pattern(/^[a-z0-9-]+$/),
+);
+
+/**
+ * A Discord role snowflake — a numeric string (Discord ids are 64-bit ints
+ * serialized as decimal strings, ≤ 20 digits). The tier→Discord-role BINDING.
+ */
+const DiscordRoleId = S.String.pipe(
+  S.minLength(1),
+  S.maxLength(DISCORD_ROLE_ID_MAX),
+  S.pattern(/^[0-9]+$/),
+);
+
+/**
+ * One rung on a community's tier ladder — the contract mirror of the
+ * dashboard's hardcoded `TierDef` (`{ id, label, gate, color }` in
+ * freeside-dashboard `_data/roles-shared.ts`), plus the `discordRoleId`
+ * BINDING this surface exists to make CM-editable.
+ *
+ * `color` reuses the SAME bounded grammar accent colors use
+ * (`BoundedString(COLOR_MAX)` — the mechanism `ThemeBranding.colors.accent`
+ * uses), so it accepts both the hex (`#FFD700`) and oklch (`oklch(0.70 0.13
+ * 70)`) forms the dashboard ladders carry. Required: it drives the tier swatch.
+ *
+ * `gate` is a NUMBER — the score-api score threshold a wallet must reach to
+ * earn the tier (finite, ≥ 0). This is the contract-layer NORMALIZATION of the
+ * dashboard's plain-language gate string ("Score 90–99", "1,111+ BGT"): the
+ * dashboard renders prose for humans; this surface stores the machine
+ * threshold the bot side (P4) compares a score against.
+ *
+ * Closed (`onExcessProperty: 'error'` tree-wide via validate.ts): any rung key
+ * not declared here is rejected at decode — consistent with the
+ * ComponentInstance.props closed-slot discipline.
+ */
+export const TierRung = S.Struct({
+  /** Stable tier id — bounded slug `[a-z0-9-]`, 1–40, the wire join key. */
+  id: TierId,
+  /** Display name — NonEmptyBounded(60), control-byte/zero-width rejected. */
+  label: NonEmptyBounded(TIER_LABEL_MAX),
+  /** Tier swatch color — same bounded grammar accent colors use (hex|oklch). */
+  color: BoundedString(COLOR_MAX),
+  /** Score-api score threshold to earn this tier (finite, ≥ 0). */
+  gate: S.Number.pipe(S.finite(), S.greaterThanOrEqualTo(0)),
+  /**
+   * OPTIONAL tier→Discord-role binding (a role snowflake). Unset means "no
+   * role assignment for this tier yet" — the bot side (P4) skips role grant
+   * for an unbound rung. This optionality is the whole point of the surface:
+   * a CM binds tiers to roles incrementally.
+   */
+  discordRoleId: S.optional(DiscordRoleId),
+});
+export type TierRung = S.Schema.Type<typeof TierRung>;
+
+/**
+ * The role-map surface payload (Track 2 P1) — the contract foundation for the
+ * CM-editable tier→Discord-role map. `rungs` is bounded to a sane ceiling
+ * (≤ 25 — mirrors a Discord-roles-per-guild sanity bound; the dashboard's real
+ * ladders are 8–9 rungs).
+ */
+export const RoleMapConfig = S.Struct({
+  enabled: S.Boolean,
+  rungs: S.Array(TierRung).pipe(S.maxItems(ROLE_MAP_RUNGS_MAX)),
+});
+export type RoleMapConfig = S.Schema.Type<typeof RoleMapConfig>;
+
 /** The known surfaces. Literal-locked; additive minor bumps add surfaces. */
-export const SurfaceSchema = S.Literal('verify-message');
+export const SurfaceSchema = S.Literal('verify-message', 'role-map');
 export type Surface = S.Schema.Type<typeof SurfaceSchema>;
 
 /** Map of surface -> its validated config shape (the per-surface payload type). */
 export interface SurfaceConfigMap {
   'verify-message': VerifyMessageConfig;
+  'role-map': RoleMapConfig;
 }
 
 /**
  * The wire envelope keyed by (world_slug, surface). `config` is the
- * surface-specific validated payload. V1 ships `verify-message` only, so the
- * envelope's `config` is decoded against `VerifyMessageConfig`. The generic
- * `SurfaceConfig<S>` TS type below preserves the surface->payload mapping for
- * callers; the runtime schema validates the V1 surface.
+ * surface-specific validated payload. The envelope is a DISCRIMINATED UNION on
+ * `surface`: each member pins `surface` to one literal AND `config` to that
+ * surface's payload schema, so a payload can NEVER be smuggled under the wrong
+ * surface (a `role-map` body sent as `surface: 'verify-message'` is rejected at
+ * decode). Adding a surface = add one member here + its entry in
+ * SurfaceConfigMap + KNOWN_SURFACES. The generic `SurfaceConfig<S>` TS type
+ * below preserves the surface->payload mapping for callers.
  *
  * `world_slug` regex matches world-manifest.schema.json `slug`
  * (`^[a-z][a-z0-9-]{1,20}$`) — surface-config REFERENCES the manifest's world,
@@ -275,12 +370,22 @@ export interface SurfaceConfigMap {
  */
 export const WORLD_SLUG_PATTERN = /^[a-z][a-z0-9-]{1,20}$/;
 
-export const SurfaceConfigSchema = S.Struct({
-  schema_version: S.Literal('1.0'),
-  world_slug: S.String.pipe(S.pattern(WORLD_SLUG_PATTERN)),
-  surface: SurfaceSchema,
-  config: VerifyMessageConfig,
-});
+const WorldSlug = S.String.pipe(S.pattern(WORLD_SLUG_PATTERN));
+
+export const SurfaceConfigSchema = S.Union(
+  S.Struct({
+    schema_version: S.Literal('1.0'),
+    world_slug: WorldSlug,
+    surface: S.Literal('verify-message'),
+    config: VerifyMessageConfig,
+  }),
+  S.Struct({
+    schema_version: S.Literal('1.0'),
+    world_slug: WorldSlug,
+    surface: S.Literal('role-map'),
+    config: RoleMapConfig,
+  }),
+);
 
 /** Generic TS envelope preserving the surface->payload mapping for callers. */
 export interface SurfaceConfig<Sf extends Surface = Surface> {
@@ -291,6 +396,6 @@ export interface SurfaceConfig<Sf extends Surface = Surface> {
 }
 
 export const SURFACE_CONFIG_SCHEMA_VERSION = '1.0' as const;
-export const KNOWN_SURFACES: readonly Surface[] = ['verify-message'] as const;
+export const KNOWN_SURFACES: readonly Surface[] = ['verify-message', 'role-map'] as const;
 
 export { ComponentInstance };
