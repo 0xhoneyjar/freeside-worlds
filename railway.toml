@@ -1,0 +1,16 @@
+# C-6 — Railway deploy settings for the freeside-worlds config service.
+#
+# Build: the repo Dockerfile (oven/bun) is auto-detected — no [build] block needed.
+# DB: a dedicated Railway Postgres provisioned alongside this service. Per the C-1
+# isolation invariant, DATABASE_URL points at freeside-worlds' OWN database — never
+# a world DB (mibera-db) or the identity spine.
+
+[deploy]
+# Forward-only, idempotent migrations (the _config_migrations ledger skips applied
+# files) run BEFORE the new version serves traffic. Safe to run on every deploy.
+preDeployCommand = "bun packages/config-adapters/src/migrate.ts"
+startCommand = "bun packages/config-service/src/server.ts"
+healthcheckPath = "/health"
+healthcheckTimeout = 60
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
