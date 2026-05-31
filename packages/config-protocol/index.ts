@@ -1,2 +1,2 @@
-export * from './types.js';
+export * from './surface-config.js';
 export * from './validate.js';

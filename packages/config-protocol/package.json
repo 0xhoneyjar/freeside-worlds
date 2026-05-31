@@ -3,21 +3,20 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Sealed schema + TS types for world surface-config (runtime-editable per-surface config, keyed by world_slug+surface). surface-config.schema.json is the contract; types.ts is its TS face (Jani's sietch Theme model ported verbatim). C-1 extraction. Validated by Ajv at the service boundary, mirroring @freeside-worlds/registry.",
+  "description": "Effect.Schema surface-config protocol for world surface-config (runtime-editable per-surface config, keyed by world_slug+surface). The Effect.Schema in surface-config.ts is the contract; TS types are derived via Schema.Schema.Type. Jani's sietch Theme model ported faithfully. C-1 extraction. Decode-and-validate at the service boundary, mirroring the cluster's @effect/schema convention (freeside-auth packages/protocol).",
   "license": "MIT",
   "main": "index.ts",
   "exports": {
     ".": "./index.ts",
     "./validate": "./validate.ts",
-    "./surface-config.schema.json": "./surface-config.schema.json"
+    "./surface-config": "./surface-config.ts"
   },
   "files": [
-    "*.schema.json",
     "*.ts",
-    "README.md"
+    "*.md"
   ],
   "dependencies": {
-    "ajv": "^8.17.1",
-    "ajv-formats": "^3.0.1"
+    "@effect/schema": "^0.75",
+    "effect": "^3.10.0"
   }
 }

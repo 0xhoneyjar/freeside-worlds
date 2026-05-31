@@ -191,6 +191,214 @@ describe('ConfigService — fail-closed validation', () => {
   });
 });
 
+describe('ConfigService — BLOCKER-1 hardening (store-raw-but-bounded write-side validation)', () => {
+  test('rejects a copy.title longer than the 200-char cap', async () => {
+    const { service, store } = newService();
+    const overlong: VerifyMessageConfig = {
+      ...validConfig,
+      copy: { ...validConfig.copy, title: 'x'.repeat(201) },
+    };
+    await expect(
+      service.putConfig('mibera', 'verify-message', overlong, 0, 'cm:alice'),
+    ).rejects.toBeInstanceOf(ConfigValidationError);
+    expect(await store.getCurrent('mibera', 'verify-message')).toBeNull();
+  });
+
+  test('rejects a copy.body longer than the 4000-char cap', async () => {
+    const { service } = newService();
+    const overlong: VerifyMessageConfig = {
+      ...validConfig,
+      copy: { ...validConfig.copy, body: 'y'.repeat(4001) },
+    };
+    await expect(
+      service.putConfig('mibera', 'verify-message', overlong, 0, 'cm:alice'),
+    ).rejects.toBeInstanceOf(ConfigValidationError);
+  });
+
+  test('rejects a C0 control byte (NUL) embedded in copy.title', async () => {
+    const { service, store } = newService();
+    const sneaky: VerifyMessageConfig = {
+      ...validConfig,
+      copy: { ...validConfig.copy, title: 'Ver ify' },
+    };
+    await expect(
+      service.putConfig('mibera', 'verify-message', sneaky, 0, 'cm:alice'),
+    ).rejects.toBeInstanceOf(ConfigValidationError);
+    expect(await store.getCurrent('mibera', 'verify-message')).toBeNull();
+  });
+
+  test('rejects an ANSI escape (C1/ESC) in copy.body', async () => {
+    const { service } = newService();
+    const sneaky: VerifyMessageConfig = {
+      ...validConfig,
+      copy: { ...validConfig.copy, body: 'Connect [31mred[0m wallet' },
+    };
+    await expect(
+      service.putConfig('mibera', 'verify-message', sneaky, 0, 'cm:alice'),
+    ).rejects.toBeInstanceOf(ConfigValidationError);
+  });
+
+  test('rejects a zero-width character (U+200B) in copy.buttonLabel', async () => {
+    const { service } = newService();
+    const sneaky: VerifyMessageConfig = {
+      ...validConfig,
+      copy: { ...validConfig.copy, buttonLabel: 'Ver​ify' },
+    };
+    await expect(
+      service.putConfig('mibera', 'verify-message', sneaky, 0, 'cm:alice'),
+    ).rejects.toBeInstanceOf(ConfigValidationError);
+  });
+
+  test('rejects a RTL-override (U+202E) bidi-spoof char in copy.title', async () => {
+    const { service } = newService();
+    const sneaky: VerifyMessageConfig = {
+      ...validConfig,
+      copy: { ...validConfig.copy, title: 'Verify‮gnitteS' },
+    };
+    await expect(
+      service.putConfig('mibera', 'verify-message', sneaky, 0, 'cm:alice'),
+    ).rejects.toBeInstanceOf(ConfigValidationError);
+  });
+
+  test('rejects an unknown key in a theme component props slot (closed slot-schema)', async () => {
+    const { service, store } = newService();
+    const withRogueProp = {
+      ...validConfig,
+      theme: {
+        id: 't1',
+        name: 'Sietch Dark',
+        branding: {
+          colors: {
+            primary: '#e8a', secondary: '#222', accent: '#f0c',
+            background: '#000', surface: '#111', text: '#fff',
+          },
+          fonts: {
+            heading: { family: 'Inter', weight: 700 },
+            body: { family: 'Inter', weight: 400 },
+          },
+          borderRadius: 'md', spacing: 'comfortable',
+        },
+        pages: [{
+          id: 'p1', name: 'Verify', slug: 'verify',
+          // `onClick` is NOT a known slot key — open-record injection vector.
+          components: [{ id: 'c1', type: 'hero', props: { heading: 'gm', onClick: 'alert(1)' } }],
+        }],
+        createdAt: '2026-05-30T00:00:00.000Z',
+        updatedAt: '2026-05-30T00:00:00.000Z',
+      },
+    } as unknown as VerifyMessageConfig;
+    await expect(
+      service.putConfig('mibera', 'verify-message', withRogueProp, 0, 'cm:alice'),
+    ).rejects.toBeInstanceOf(ConfigValidationError);
+    expect(await store.getCurrent('mibera', 'verify-message')).toBeNull();
+  });
+
+  test('rejects a control byte hidden inside a theme component prop string', async () => {
+    const { service } = newService();
+    const withSneakyProp = {
+      ...validConfig,
+      theme: {
+        id: 't1', name: 'Sietch Dark',
+        branding: {
+          colors: {
+            primary: '#e8a', secondary: '#222', accent: '#f0c',
+            background: '#000', surface: '#111', text: '#fff',
+          },
+          fonts: {
+            heading: { family: 'Inter', weight: 700 },
+            body: { family: 'Inter', weight: 400 },
+          },
+          borderRadius: 'md', spacing: 'comfortable',
+        },
+        pages: [{
+          id: 'p1', name: 'Verify', slug: 'verify',
+          components: [{ id: 'c1', type: 'rich-text', props: { content: 'hithere' } }],
+        }],
+        createdAt: '2026-05-30T00:00:00.000Z',
+        updatedAt: '2026-05-30T00:00:00.000Z',
+      },
+    } as unknown as VerifyMessageConfig;
+    await expect(
+      service.putConfig('mibera', 'verify-message', withSneakyProp, 0, 'cm:alice'),
+    ).rejects.toBeInstanceOf(ConfigValidationError);
+  });
+
+  test('accepts a theme whose component props use only known, bounded slots', async () => {
+    const { service } = newService();
+    const clean: VerifyMessageConfig = {
+      ...validConfig,
+      theme: {
+        id: 't1', name: 'Sietch Dark',
+        branding: {
+          colors: {
+            primary: '#e8a', secondary: '#222', accent: '#f0c',
+            background: '#000', surface: '#111', text: '#fff',
+          },
+          fonts: {
+            heading: { family: 'Inter', weight: 700 },
+            body: { family: 'Inter', weight: 400 },
+          },
+          borderRadius: 'md', spacing: 'comfortable',
+        },
+        pages: [{
+          id: 'p1', name: 'Verify', slug: 'verify',
+          components: [
+            {
+              id: 'c1', type: 'leaderboard',
+              props: { title: 'Top holders', showRank: true, maxEntries: 10, columns: 3 },
+            },
+          ],
+        }],
+        createdAt: '2026-05-30T00:00:00.000Z',
+        updatedAt: '2026-05-30T00:00:00.000Z',
+      },
+    };
+    const ok = await service.putConfig('mibera', 'verify-message', clean, 0, 'cm:alice');
+    expect(ok.version).toBe(1);
+  });
+
+  test('accepts a deeply nested (recursive children) component tree within bounds', async () => {
+    const { service } = newService();
+    const nested: VerifyMessageConfig = {
+      ...validConfig,
+      theme: {
+        id: 't1', name: 'Sietch Dark',
+        branding: {
+          colors: {
+            primary: '#e8a', secondary: '#222', accent: '#f0c',
+            background: '#000', surface: '#111', text: '#fff',
+          },
+          fonts: {
+            heading: { family: 'Inter', weight: 700 },
+            body: { family: 'Inter', weight: 400 },
+          },
+          borderRadius: 'md', spacing: 'comfortable',
+        },
+        pages: [{
+          id: 'p1', name: 'Verify', slug: 'verify',
+          components: [
+            {
+              id: 'root', type: 'layout-container',
+              props: { direction: 'vertical', gap: 'md' },
+              children: [
+                { id: 'c1', type: 'rich-text', props: { content: 'gm bera', textAlign: 'left' } },
+                {
+                  id: 'c2', type: 'layout-container', props: { direction: 'horizontal' },
+                  children: [{ id: 'c3', type: 'leaderboard', props: { showRank: false } }],
+                },
+              ],
+            },
+          ],
+        }],
+        createdAt: '2026-05-30T00:00:00.000Z',
+        updatedAt: '2026-05-30T00:00:00.000Z',
+      },
+    };
+    const ok = await service.putConfig('mibera', 'verify-message', nested, 0, 'cm:alice');
+    expect(ok.version).toBe(1);
+  });
+});
+
 describe('ConfigService — per-world isolation', () => {
   test('two worlds with the same surface keep independent heads + versions', async () => {
     const { service } = newService();
