@@ -1,0 +1,74 @@
+/**
+ * tests/helpers/harness.ts — the shared gate test environment (SDD §8.4).
+ *
+ * Builds a `GateCheckedRoleWriter` over recording mock Layers (RoleWriter +
+ * AcvpEmitter + WorldLock) so a test can: run `applyBatch`, then inspect the
+ * inner-writer recorder (ZERO invocations under SHADOW) + the emitter recorder
+ * (confirmed rejection/intent/applied counts). The `Layer.provideMerge(gate,
+ * base)` shape exposes BOTH the gate Tag AND the base services (applyBatch's R
+ * channel) in one env.
+ */
+import { Effect, Layer, Ref } from 'effect';
+import {
+  makeGateCheckedRoleWriter,
+  GateCheckedRoleWriter,
+  type ApplyBatchResult,
+} from '../../src/effectful/gate-checked-role-writer.js';
+import { makeModeControl, type ModeControl } from '../../src/effectful/mode-control.js';
+import { makeRecordingEmitter, type Recorder, type MockEmitterOptions } from '../../src/effectful/acvp-emitter.mock.js';
+import { makeInMemoryWorldLock } from '../../src/effectful/world-lock.mock.js';
+import { makeRecordingRoleWriter, type WriterRecorder, type MockWriterOptions } from './mock-role-writer.js';
+import type { ApplyMode, Hex64, WriteCapability, WriteIntentBatch } from '../../src/types.js';
+import { HASH_A } from './batch.js';
+
+export interface Harness {
+  readonly mode: ModeControl;
+  readonly writerRec: WriterRecorder;
+  readonly emitterRec: Recorder;
+  /** apply a batch through the gate, returning the terminal result. */
+  applyBatch(
+    batch: WriteIntentBatch,
+    cap: WriteCapability,
+    priorState?: ApplyBatchResult,
+  ): Effect.Effect<ApplyBatchResult, unknown>;
+  /** flip the SAME mode Ref the gate reads (R-10 / mode-race tests). */
+  setMode(m: ApplyMode): Effect.Effect<void>;
+}
+
+export interface HarnessOptions {
+  readonly initialMode?: ApplyMode;
+  readonly currentMapHash?: Hex64;
+  readonly writer?: MockWriterOptions;
+  readonly emitter?: MockEmitterOptions;
+}
+
+/**
+ * Build a harness as an Effect (the mode Ref + lock are created in Effect). Run
+ * the returned `harness.applyBatch(...)` inside the same Effect scope.
+ */
+export function makeHarness(opts: HarnessOptions = {}): Effect.Effect<Harness> {
+  const { layer: writerLayer, recorder: writerRec } = makeRecordingRoleWriter(opts.writer);
+  const { layer: emitterLayer, recorder: emitterRec } = makeRecordingEmitter(opts.emitter);
+  const lockLayer = makeInMemoryWorldLock();
+  const currentMapHash = opts.currentMapHash ?? HASH_A;
+
+  return Effect.gen(function* () {
+    const mode = yield* makeModeControl(opts.initialMode ?? 'SHADOW');
+    const base = Layer.mergeAll(writerLayer, emitterLayer, lockLayer);
+    const gateLayer = makeGateCheckedRoleWriter(mode, () => currentMapHash);
+    const env = Layer.provideMerge(gateLayer, base);
+
+    const harness: Harness = {
+      mode,
+      writerRec,
+      emitterRec,
+      applyBatch: (batch, cap, priorState) =>
+        Effect.gen(function* () {
+          const gate = yield* GateCheckedRoleWriter;
+          return yield* gate.applyBatch(batch, cap, priorState);
+        }).pipe(Effect.provide(env)) as Effect.Effect<ApplyBatchResult, unknown>,
+      setMode: (m) => Ref.set(mode.ref, m),
+    };
+    return harness;
+  });
+}
