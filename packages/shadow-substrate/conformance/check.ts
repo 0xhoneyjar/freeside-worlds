@@ -139,17 +139,14 @@ assertSetEqual(
 // roster_version is the named `RosterVersion` schema.
 assertSetEqual('AuthzContext.roster_version', structKeys(RosterVersion), aShape.roster_version);
 
-// WriteCapability is a TS branded `export type` (NO runtime schema), so its keys
-// cannot be derived from a schema at runtime. Assert against a representative
-// WriteCapability-shaped instance — the DATA fields consumers bind against. The
-// `report_hash`/`transition_version`/`authz_decision_id` annotation pins the
-// sample to the real type's data fields at compile time (a renamed data field on
-// `WriteCapability` would fail `tsc`); the brand symbol is non-enumerable and is
-// excluded from `data_keys` by design.
-const writeCapSample: Pick<
-  WriteCapability,
-  'report_hash' | 'transition_version' | 'authz_decision_id'
-> = {
+// WriteCapability is a TS branded `export type` (no runtime schema). Derive its
+// DATA keys at COMPILE TIME as every string-keyed field — the brand is a
+// `unique symbol`, excluded by `Extract<…, string>`. A FULL mapped type (not a
+// hand-picked Pick) means ADDING a data field forces a new entry here (tsc
+// error), closing the add-direction hole: now add/rename/remove ALL fail the
+// build. `Object.keys` then gives the real runtime key set for assertSetEqual.
+type WriteCapabilityDataKey = Extract<keyof WriteCapability, string>;
+const writeCapSample: { readonly [K in WriteCapabilityDataKey]: WriteCapability[K] } = {
   report_hash: '0'.repeat(64) as WriteCapability['report_hash'],
   transition_version: 1,
   authz_decision_id: 'authz-decision-conformance-sample',
