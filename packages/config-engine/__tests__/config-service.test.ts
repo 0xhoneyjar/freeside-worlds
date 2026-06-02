@@ -27,15 +27,22 @@ class TestMemoryStore implements ConfigStore {
   private heads = new Map<string, CurrentConfigRow & { config: unknown }>();
   history: WriteInput[] = [];
   private nextId = 1;
-  private k(w: string, s: string) {
-    return `${w} ${s}`;
+  // S2: per-CM composite key for onboarding-lifecycle (null collapses to legacy
+  // (world, surface)). NUL separator never appears in a slug/surface/UUID.
+  private k(w: string, s: string, cm: string | null) {
+    return `${w}\0${s}\0${cm ?? ''}`;
   }
-  async getCurrent(w: string, s: string): Promise<CurrentConfigRow | null> {
-    const r = this.heads.get(this.k(w, s));
+  async getCurrent(
+    w: string,
+    s: string,
+    cm: string | null = null,
+  ): Promise<CurrentConfigRow | null> {
+    const r = this.heads.get(this.k(w, s, cm));
     return r ? { ...r } : null;
   }
   async applyWrite(input: WriteInput): Promise<WriteResult | null> {
-    const key = this.k(input.worldSlug, input.surface);
+    const cm = input.cmIdentityId ?? null;
+    const key = this.k(input.worldSlug, input.surface, cm);
     const existing = this.heads.get(key);
     if (input.action === 'CREATE') {
       if (existing) return null;
@@ -49,6 +56,7 @@ class TestMemoryStore implements ConfigStore {
     this.heads.set(key, {
       worldSlug: input.worldSlug,
       surface: input.surface,
+      cmIdentityId: cm,
       schemaVersion: '1.0',
       config: input.newConfig,
       version: newVersion,
@@ -58,8 +66,10 @@ class TestMemoryStore implements ConfigStore {
     });
     return { recordId, newVersion };
   }
-  _history(w: string, s: string): WriteInput[] {
-    return this.history.filter((h) => h.worldSlug === w && h.surface === s);
+  _history(w: string, s: string, cm: string | null = null): WriteInput[] {
+    return this.history.filter(
+      (h) => h.worldSlug === w && h.surface === s && (h.cmIdentityId ?? null) === cm,
+    );
   }
 }
 const MemoryConfigStore = TestMemoryStore;

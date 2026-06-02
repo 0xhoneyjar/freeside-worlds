@@ -81,8 +81,9 @@ export class ConfigService {
   async getConfig<S extends Surface>(
     worldSlug: string,
     surface: S,
+    cmIdentityId: string | null = null,
   ): Promise<ReadResult<S> | null> {
-    const row = await this.store.getCurrent(worldSlug, surface);
+    const row = await this.store.getCurrent(worldSlug, surface, cmIdentityId);
     if (!row) return null;
     return this.rowToReadResult<S>(row, surface);
   }
@@ -109,6 +110,7 @@ export class ConfigService {
     expectedVersion: number,
     actor: string,
     reason?: string,
+    cmIdentityId: string | null = null,
   ): Promise<WriteOk<S>> {
     // 1. fail-closed validation BEFORE any store mutation.
     const validation = validateSurfacePayload<S>(worldSlug, surface, config);
@@ -124,8 +126,8 @@ export class ConfigService {
       );
     }
 
-    // 2. read current head (prev_config + action).
-    const current = await this.store.getCurrent(worldSlug, surface);
+    // 2. read current head (prev_config + action) — per-CM for onboarding-lifecycle.
+    const current = await this.store.getCurrent(worldSlug, surface, cmIdentityId);
     const isCreate = current === null;
 
     // On UPDATE, the caller's expectedVersion must match the head before we
@@ -145,6 +147,7 @@ export class ConfigService {
     const result = await this.store.applyWrite({
       worldSlug,
       surface,
+      cmIdentityId,
       expectedVersion: isCreate ? null : expectedVersion,
       action: isCreate ? 'CREATE' : 'UPDATE',
       prevConfig: isCreate ? null : current!.config,
@@ -156,7 +159,7 @@ export class ConfigService {
     // 5. null => optimistic-lock conflict (0 rows affected on the guard, or a
     // CREATE race where the row appeared between our read and insert).
     if (result === null) {
-      const latest = await this.store.getCurrent(worldSlug, surface);
+      const latest = await this.store.getCurrent(worldSlug, surface, cmIdentityId);
       throw new ConfigVersionConflictError(
         worldSlug,
         surface,

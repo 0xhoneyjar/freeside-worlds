@@ -41,6 +41,7 @@ export interface PgClientLike extends PgQueryable {
 interface CurrentConfigDbRow {
   world_slug: string;
   surface: string;
+  cm_identity_id: string;
   schema_version: string;
   config: unknown;
   version: number;
@@ -56,13 +57,28 @@ export class PgConfigStore implements ConfigStore {
     this.pool = pool;
   }
 
-  async getCurrent(worldSlug: string, surface: string): Promise<CurrentConfigRow | null> {
+  /**
+   * Map the engine's `cmIdentityId: string | null` to the DB column. S2
+   * (SDD §3.1): the `onboarding-lifecycle` surface carries the per-CM sub-key;
+   * every other surface passes `null`, which the schema stores as '' (the
+   * `cm_identity_id NOT NULL DEFAULT ''` column, migration 0002) so the
+   * composite primary key stays well-formed (NULL in a PK is disallowed).
+   */
+  private cmKey(cmIdentityId: string | null | undefined): string {
+    return cmIdentityId ?? '';
+  }
+
+  async getCurrent(
+    worldSlug: string,
+    surface: string,
+    cmIdentityId: string | null = null,
+  ): Promise<CurrentConfigRow | null> {
     const res = await this.pool.query<CurrentConfigDbRow>(
-      `SELECT world_slug, surface, schema_version, config, version,
+      `SELECT world_slug, surface, cm_identity_id, schema_version, config, version,
               last_record_id, created_at, updated_at
          FROM current_config
-        WHERE world_slug = $1 AND surface = $2`,
-      [worldSlug, surface],
+        WHERE world_slug = $1 AND surface = $2 AND cm_identity_id = $3`,
+      [worldSlug, surface, this.cmKey(cmIdentityId)],
     );
     const row = res.rows[0];
     if (!row) return null;
@@ -81,18 +97,20 @@ export class PgConfigStore implements ConfigStore {
    */
   async applyWrite(input: WriteInput): Promise<WriteResult | null> {
     const client = await this.pool.connect();
+    const cmIdentityId = this.cmKey(input.cmIdentityId);
     try {
       await client.query('BEGIN');
 
       // 1. append the immutable history row first (it carries prev+new).
       const recordRes = await client.query<{ id: string | number }>(
         `INSERT INTO config_record
-            (world_slug, surface, action, prev_config, new_config, actor, reason)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+            (world_slug, surface, cm_identity_id, action, prev_config, new_config, actor, reason)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING id`,
         [
           input.worldSlug,
           input.surface,
+          cmIdentityId,
           input.action,
           input.prevConfig === null ? null : JSON.stringify(input.prevConfig),
           JSON.stringify(input.newConfig),
@@ -107,13 +125,14 @@ export class PgConfigStore implements ConfigStore {
       if (input.action === 'CREATE') {
         // CREATE: insert head; ON CONFLICT DO NOTHING so a concurrent CREATE
         // (two writers racing the first config) yields 0 rows -> conflict.
+        // The conflict target is the composite PK (world, surface, cm_identity_id).
         const insertRes = await client.query<{ version: number }>(
           `INSERT INTO current_config
-              (world_slug, surface, schema_version, config, version, last_record_id)
-           VALUES ($1, $2, '1.0', $3, 1, $4)
-           ON CONFLICT (world_slug, surface) DO NOTHING
+              (world_slug, surface, cm_identity_id, schema_version, config, version, last_record_id)
+           VALUES ($1, $2, $3, '1.0', $4, 1, $5)
+           ON CONFLICT (world_slug, surface, cm_identity_id) DO NOTHING
            RETURNING version`,
-          [input.worldSlug, input.surface, JSON.stringify(input.newConfig), recordId],
+          [input.worldSlug, input.surface, cmIdentityId, JSON.stringify(input.newConfig), recordId],
         );
         if (insertRes.rowCount === 0) {
           await client.query('ROLLBACK');
@@ -122,20 +141,22 @@ export class PgConfigStore implements ConfigStore {
         newVersion = insertRes.rows[0]!.version;
       } else {
         // UPDATE / RESTORE: version-guarded head move. This IS the optimistic
-        // lock — UPDATE ... WHERE version = expected; 0 rows = conflict.
+        // lock — UPDATE ... WHERE version = expected; 0 rows = conflict. The
+        // guard matches on the full composite key (per-CM for onboarding-lifecycle).
         const updateRes = await client.query<{ version: number }>(
           `UPDATE current_config
               SET config = $1,
                   version = version + 1,
                   last_record_id = $2,
                   updated_at = now()
-            WHERE world_slug = $3 AND surface = $4 AND version = $5
+            WHERE world_slug = $3 AND surface = $4 AND cm_identity_id = $5 AND version = $6
           RETURNING version`,
           [
             JSON.stringify(input.newConfig),
             recordId,
             input.worldSlug,
             input.surface,
+            cmIdentityId,
             input.expectedVersion,
           ],
         );
@@ -164,6 +185,9 @@ export class PgConfigStore implements ConfigStore {
     return {
       worldSlug: row.world_slug,
       surface: row.surface,
+      // Map the DB's '' sentinel back to null so the engine sees a clean
+      // null for every non-onboarding-lifecycle surface (SDD §3.1).
+      cmIdentityId: row.cm_identity_id === '' ? null : row.cm_identity_id,
       schemaVersion: row.schema_version,
       // pg returns JSONB as a parsed object already; pass through.
       config: row.config,

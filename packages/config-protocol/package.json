@@ -16,6 +16,7 @@
     "*.md"
   ],
   "dependencies": {
+    "@freeside-worlds/shadow-substrate": "workspace:*",
     "@effect/schema": "^0.75",
     "effect": "^3.10.0"
   }

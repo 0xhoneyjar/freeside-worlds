@@ -60,6 +60,31 @@
 
 import { Schema as S } from '@effect/schema';
 
+/**
+ * ── S2 surface registration (shadow-onboarding-substrate, SDD §3.2/§1.4) ────
+ * The three NEW config surfaces (`role-map`, `apply-mode`, `onboarding-lifecycle`)
+ * are payload-typed by the shadow substrate (it authored them in-package, S0).
+ * config-protocol IMPORTS those schemas and registers the surfaces here — the
+ * exact additive pattern the sealed `verify-message` precedent established
+ * (extend `SurfaceSchema` / `SurfaceConfigMap` / `KNOWN_SURFACES`; no migration).
+ *
+ * Dependency arrow (SDD D1, resolved): ONE-WAY `config-protocol → shadow-substrate`.
+ * config-protocol depends on the substrate (this import + the `workspace:*` dep);
+ * the substrate does NOT import config-protocol (it keeps its own byte-identical
+ * `BoundedString`, see shadow-substrate/src/schemas/primitives.ts grounding note).
+ * That single direction is what avoids a day-one circular dependency.
+ */
+import {
+  RoleMapConfig,
+  ApplyModeConfig,
+  OnboardingLifecycle,
+} from '@freeside-worlds/shadow-substrate';
+import type {
+  RoleMapConfig as RoleMapConfigType,
+  ApplyModeConfig as ApplyModeConfigType,
+  OnboardingLifecycle as OnboardingLifecycleType,
+} from '@freeside-worlds/shadow-substrate';
+
 // ─── BLOCKER-1 primitives: bounded, control-byte-free strings ─────────────
 
 /**
@@ -253,34 +278,86 @@ export const VerifyMessageConfig = S.Struct({
 });
 export type VerifyMessageConfig = S.Schema.Type<typeof VerifyMessageConfig>;
 
-/** The known surfaces. Literal-locked; additive minor bumps add surfaces. */
-export const SurfaceSchema = S.Literal('verify-message');
+/**
+ * The known surfaces. Literal-locked; additive minor bumps add surfaces.
+ *
+ * S2 (shadow-onboarding-substrate) adds three surfaces, payload-typed by the
+ * shadow substrate (SDD §3.2): `role-map` (role rules + scaffolding),
+ * `apply-mode` (the single safety-bearing state), and `onboarding-lifecycle`
+ * (the per-CM resumable record — keyed `(world, surface, cm_identity_id)` in
+ * the engine, §3.1). `verify-message` stays first; this is purely additive.
+ */
+export const SurfaceSchema = S.Literal(
+  'verify-message',
+  'role-map',
+  'apply-mode',
+  'onboarding-lifecycle',
+);
 export type Surface = S.Schema.Type<typeof SurfaceSchema>;
 
 /** Map of surface -> its validated config shape (the per-surface payload type). */
 export interface SurfaceConfigMap {
   'verify-message': VerifyMessageConfig;
+  'role-map': RoleMapConfigType;
+  'apply-mode': ApplyModeConfigType;
+  'onboarding-lifecycle': OnboardingLifecycleType;
 }
 
 /**
  * The wire envelope keyed by (world_slug, surface). `config` is the
- * surface-specific validated payload. V1 ships `verify-message` only, so the
- * envelope's `config` is decoded against `VerifyMessageConfig`. The generic
- * `SurfaceConfig<S>` TS type below preserves the surface->payload mapping for
- * callers; the runtime schema validates the V1 surface.
+ * surface-specific validated payload. Each surface decodes against its OWN
+ * payload schema, so the validator (validate.ts, `onExcessProperty: 'error'`)
+ * applies the right closed-schema per surface. The generic `SurfaceConfig<S>`
+ * TS type below preserves the surface->payload mapping for callers.
  *
  * `world_slug` regex matches world-manifest.schema.json `slug`
  * (`^[a-z][a-z0-9-]{1,20}$`) — surface-config REFERENCES the manifest's world,
  * it does not redeclare tenant_id/guild_ids/auth.
+ *
+ * S2: the schema becomes a discriminated UNION keyed on `surface` — `verify-message`
+ * → `VerifyMessageConfig`, `role-map` → `RoleMapConfig`, `apply-mode` →
+ * `ApplyModeConfig`, `onboarding-lifecycle` → `OnboardingLifecycle` (SDD §3.2).
+ * `S.Union` over a shared discriminant (`surface`) gives precise, surface-correct
+ * decode errors (the union member whose literal matches `surface` is selected).
  */
 export const WORLD_SLUG_PATTERN = /^[a-z][a-z0-9-]{1,20}$/;
 
-export const SurfaceConfigSchema = S.Struct({
+const WorldSlugField = S.String.pipe(S.pattern(WORLD_SLUG_PATTERN));
+
+const VerifyMessageEnvelope = S.Struct({
   schema_version: S.Literal('1.0'),
-  world_slug: S.String.pipe(S.pattern(WORLD_SLUG_PATTERN)),
-  surface: SurfaceSchema,
+  world_slug: WorldSlugField,
+  surface: S.Literal('verify-message'),
   config: VerifyMessageConfig,
 });
+
+const RoleMapEnvelope = S.Struct({
+  schema_version: S.Literal('1.0'),
+  world_slug: WorldSlugField,
+  surface: S.Literal('role-map'),
+  config: RoleMapConfig,
+});
+
+const ApplyModeEnvelope = S.Struct({
+  schema_version: S.Literal('1.0'),
+  world_slug: WorldSlugField,
+  surface: S.Literal('apply-mode'),
+  config: ApplyModeConfig,
+});
+
+const OnboardingLifecycleEnvelope = S.Struct({
+  schema_version: S.Literal('1.0'),
+  world_slug: WorldSlugField,
+  surface: S.Literal('onboarding-lifecycle'),
+  config: OnboardingLifecycle,
+});
+
+export const SurfaceConfigSchema = S.Union(
+  VerifyMessageEnvelope,
+  RoleMapEnvelope,
+  ApplyModeEnvelope,
+  OnboardingLifecycleEnvelope,
+);
 
 /** Generic TS envelope preserving the surface->payload mapping for callers. */
 export interface SurfaceConfig<Sf extends Surface = Surface> {
@@ -291,6 +368,23 @@ export interface SurfaceConfig<Sf extends Surface = Surface> {
 }
 
 export const SURFACE_CONFIG_SCHEMA_VERSION = '1.0' as const;
-export const KNOWN_SURFACES: readonly Surface[] = ['verify-message'] as const;
+export const KNOWN_SURFACES: readonly Surface[] = [
+  'verify-message',
+  'role-map',
+  'apply-mode',
+  'onboarding-lifecycle',
+] as const;
 
 export { ComponentInstance };
+
+/**
+ * Re-export the substrate's surface payload schemas so config-protocol callers
+ * (config-engine, config-service, tests) have one import site for the surface
+ * contract — the dependency arrow stays one-way `config-protocol → shadow-substrate`.
+ */
+export { RoleMapConfig, ApplyModeConfig, OnboardingLifecycle };
+export type {
+  RoleMapConfigType,
+  ApplyModeConfigType,
+  OnboardingLifecycleType,
+};

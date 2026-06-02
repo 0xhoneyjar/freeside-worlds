@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "The config SERVICE — minimal Bun HTTP exposing GET/PUT /v1/config/:world/:surface over the config engine. The FIRST runtime in freeside-worlds. Auth is stubbed (service-token read + Bearer-placeholder write); real CM auth is C-2.",
+  "description": "The config SERVICE — minimal Bun HTTP exposing GET/PUT /v1/config/:world/:surface over the config engine. The FIRST runtime in freeside-worlds. S2 (shadow-onboarding-substrate) replaced the C-1 any-bearer write stub with the FR-10 authorization floor: identity-token verification + the substrate's resolveAuthz admin_principals decision (closes R-3).",
   "license": "MIT",
   "main": "src/server.ts",
   "scripts": {
@@ -13,7 +13,9 @@
   "dependencies": {
     "@freeside-worlds/config-adapters": "workspace:*",
     "@freeside-worlds/config-engine": "workspace:*",
-    "@freeside-worlds/config-protocol": "workspace:*"
+    "@freeside-worlds/config-protocol": "workspace:*",
+    "@freeside-worlds/shadow-substrate": "workspace:*",
+    "effect": "^3.10.0"
   },
   "peerDependencies": {
     "pg": "^8.13.0"

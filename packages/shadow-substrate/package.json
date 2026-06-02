@@ -29,7 +29,6 @@
   },
   "dependencies": {
     "@0xhoneyjar/events": "github:0xHoneyJar/loa-freeside#68f5a89cb02c6b3ddf5ab14a1d65753bc02bd9fe",
-    "@freeside-worlds/config-protocol": "workspace:*",
     "@effect/schema": "^0.75",
     "effect": "^3.10.0",
     "@noble/curves": "^1.7.0",
