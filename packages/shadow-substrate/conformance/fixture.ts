@@ -49,6 +49,9 @@ export const CANONICAL_VERSION_HASH_INPUT: RoleMapVersionInput = {
     world_slug: 'purupuru',
     guild_id: '111122223333444455',
     namespace_prefix: 'purupuru:',
+    // NOTE: an ARBITRARY frozen hash-input value (it happens to be the MST /
+    // Mibera-VM address), NOT Purupuru's real on-chain contract. Changing it
+    // would force a needless CANONICAL_VERSION_HASH re-freeze — leave it.
     nft_contracts: ['0x048327A187b944ddac61c6e202BfccD20d17c008'],
   },
 };
