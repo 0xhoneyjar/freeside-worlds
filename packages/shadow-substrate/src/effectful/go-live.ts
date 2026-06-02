@@ -106,37 +106,61 @@ export function goLive(
     });
 
     // 4. authorized — flip the mode, audit the transition, MINT the capability.
-    yield* Ref.set(mode.ref, newMode);
+    //    The mode flip + the `mode.transitioned` audit + the mint run UNDER the
+    //    SHARED mode lock (B5/CRITICAL-3): SHADOW→LIVE (here) and LIVE→SHADOW
+    //    (`rollback`) take the SAME lock, so the two transitions serialize and a
+    //    go_live can never race a rollback's flip. No deadlock: the lens calls
+    //    `goLive` BEFORE `applyBatch` (never nested inside an applyBatch that
+    //    already holds the lock).
+    return yield* mode.withModeLock(
+      Effect.gen(function* () {
+        // CLEANUP: if the world is ALREADY LIVE, short-circuit — no spurious
+        // `mode.transitioned` audit + no redundant mint. (The property test's
+        // model already skips go_live-from-LIVE; the production path is now
+        // faithful to it.) We still return a freshly-minted capability bound to
+        // this authorized decision so the caller has a usable cap.
+        const current = yield* Ref.get(mode.ref);
+        const capability = mintWriteCapability({
+          report_hash: input.reportHash,
+          transition_version: input.transitionVersion,
+          authz_decision_id: decision.authz_decision_id,
+        });
 
-    yield* AcvpEmitter.pipe(
-      Effect.flatMap((emitter) =>
-        emitter.emitConfirmed({
-          event_type: SHADOW_MODE_TRANSITIONED,
-          payload: {
-            world: input.world,
-            from: 'SHADOW',
-            to: 'LIVE',
-            actor: input.actor,
-            report_hash: input.reportHash,
-          },
-        }),
-      ),
-      // a mode-transition audit hiccup does not un-flip the mode; the intent/
-      // applied per-op events (write-after-audit) are the load-bearing trail.
-      Effect.catchAll(() => Effect.void),
+        if (current === 'LIVE') {
+          return {
+            mode: 'LIVE' as ApplyMode,
+            capability,
+            authzDecisionId: decision.authz_decision_id,
+          };
+        }
+
+        yield* Ref.set(mode.ref, newMode);
+
+        yield* AcvpEmitter.pipe(
+          Effect.flatMap((emitter) =>
+            emitter.emitConfirmed({
+              event_type: SHADOW_MODE_TRANSITIONED,
+              payload: {
+                world: input.world,
+                from: 'SHADOW',
+                to: 'LIVE',
+                actor: input.actor,
+                report_hash: input.reportHash,
+              },
+            }),
+          ),
+          // a mode-transition audit hiccup does not un-flip the mode; the intent/
+          // applied per-op events (write-after-audit) are the load-bearing trail.
+          Effect.catchAll(() => Effect.void),
+        );
+
+        return {
+          mode: newMode,
+          capability,
+          authzDecisionId: decision.authz_decision_id,
+        };
+      }),
     );
-
-    const capability = mintWriteCapability({
-      report_hash: input.reportHash,
-      transition_version: input.transitionVersion,
-      authz_decision_id: decision.authz_decision_id,
-    });
-
-    return {
-      mode: newMode,
-      capability,
-      authzDecisionId: decision.authz_decision_id,
-    };
   });
 }
 

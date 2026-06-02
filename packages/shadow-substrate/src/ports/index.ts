@@ -42,10 +42,31 @@ export class RosterSource extends Context.Tag('shadow/RosterSource')<
  * accident-prevention seam — NOT a runtime secret; SDD §4.4.4): a raw write
  * written by mistake will not type-check. The enforced boundary is the gate +
  * server-side authz + write-after-audit, not the token's runtime forgeability.
+ *
+ * ── PORT CONTRACT: `createRole` IS check-then-create / idempotent-by-role_key
+ *    against LIVE state (SDD §4.4.1, B10) ────────────────────────────────────
+ * `createRole` MUST `GET` the guild roleset and create a role ONLY IF a role
+ * with the namespaced `role_key` is ABSENT; if a role with that key already
+ * exists it MUST return the existing id WITHOUT creating a second one. This is
+ * the load-bearing contract for the cross-batch B10 (TOCTOU) guarantee: the
+ * gate serializes the GET-then-create span per world via the `WorldLock`, so a
+ * second concurrent same-world batch's `createRole` GETs a roleset that ALREADY
+ * contains the first batch's role and reuses it — exactly one create per
+ * role_key per world, even under concurrency. The cross-batch dedup is a
+ * property of (world-lock-serialized span) × (check-then-create against live
+ * state) — it does NOT depend on the caller threading a prior ledger or holding
+ * an external mutex. (The in-batch / cross-retry `roles_created` ledger inside
+ * the gate is an ADDITIONAL fast-path skip; it is not the cross-batch guarantee.)
  */
 export class RoleWriter extends Context.Tag('shadow/RoleWriter')<
   RoleWriter,
   {
+    /**
+     * Check-then-create against live state, serialized by the gate's world-lock.
+     * Idempotent by `role_key`: if a role with the namespaced key already exists
+     * in the live roleset, return its id (no second create). See the port
+     * contract above (B10).
+     */
     readonly createRole: (
       cap: WriteCapability,
       intent: CreateRoleIntent,

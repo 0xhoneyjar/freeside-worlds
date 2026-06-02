@@ -154,6 +154,37 @@ describe('goLive — authorized SHADOW→LIVE', () => {
     expect(modeNow).toBe('SHADOW');
   });
 
+  test('CLEANUP: go_live against an ALREADY-LIVE world short-circuits (no extra transitioned audit, no extra mint side-effect)', async () => {
+    const { layer: emitterLayer, recorder } = makeRecordingEmitter();
+    const { layer: allowlistLayer } = makeInMemoryAllowlist({ [WORLD]: [ADMIN] });
+
+    const { firstTransitions, secondTransitions, modeNow } = await Effect.runPromise(
+      Effect.gen(function* () {
+        const env = Layer.mergeAll(emitterLayer, allowlistLayer);
+        const mode = yield* makeModeControl('SHADOW');
+        // first go_live: SHADOW→LIVE, emits ONE mode.transitioned.
+        yield* goLive(mode, goLiveInput()).pipe(Effect.provide(env));
+        const firstTransitions = recorder.countOf(SHADOW_MODE_TRANSITIONED);
+        // second go_live while ALREADY LIVE: must short-circuit — NO new
+        // mode.transitioned audit.
+        const out2 = yield* goLive(mode, goLiveInput({ transitionVersion: 2 })).pipe(
+          Effect.provide(env),
+        );
+        const secondTransitions = recorder.countOf(SHADOW_MODE_TRANSITIONED);
+        const modeNow = yield* Ref.get(mode.ref);
+        // still returns a usable capability (bound to the fresh decision).
+        expect(out2.mode).toBe('LIVE');
+        expect(out2.capability.report_hash).toBe(MAP_HASH);
+        return { firstTransitions, secondTransitions, modeNow };
+      }),
+    );
+
+    expect(firstTransitions).toBe(1);
+    // the SECOND go_live emitted NO additional mode.transitioned event.
+    expect(secondTransitions).toBe(1);
+    expect(modeNow).toBe('LIVE');
+  });
+
   test('roster drift within threshold (tunable) is allowed', async () => {
     const { layer: emitterLayer } = makeRecordingEmitter();
     const { layer: allowlistLayer } = makeInMemoryAllowlist({ [WORLD]: [ADMIN] });

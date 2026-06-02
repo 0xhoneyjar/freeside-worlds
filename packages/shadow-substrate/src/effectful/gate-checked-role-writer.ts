@@ -14,17 +14,33 @@
  *      boundary — never interleaving mid-batch.
  *   2. R-10 invocation read: read `apply_mode` from the `Ref` AT INVOCATION
  *      (never captured at Layer-build).
- *   3. B3/B14 confused-deputy guard: assert `batch.authz` is bound to THIS
- *      authorization — report_hash matches the current map hash AND the
- *      capability's; `authz_decision_id` matches the capability's.
+ *   3. B3/B14 confused-deputy / replay BINDING guard: assert `batch.authz` is
+ *      bound to THIS authorization — `report_hash` matches the current map hash
+ *      AND the capability's AND `batch.report_hash`; `authz_decision_id` /
+ *      `transition_version` match the capability's. This binds the batch to the
+ *      go_live decision (replay / confused-deputy guard). It is a FIELD match —
+ *      NOT a fresh allowlist check (see step 3b).
+ *   3b. FRESH ALLOWLIST RE-CHECK (SDD §6.2, CRITICAL-2): BEFORE the write loop,
+ *      the gate RE-RESOLVES authz server-side via `resolveAuthz({actor, world,
+ *      bypassCache:true})` and asserts the decision is `grant`. This is the
+ *      SERVER-SIDE check the §6.2/§4.4.5 "enforced boundary" advertises — it
+ *      catches a mid-batch admin REVOCATION (B4) and a forged capability whose
+ *      authz fields were self-reported to match. The binding guard (step 3) and
+ *      the fresh re-check (3b) are COMPLEMENTARY: binding stops replay against a
+ *      different decision; the fresh re-check stops "still-allowlisted?" drift +
+ *      forgery. The gate now REQUIRES `AdminAllowlistSource` in context.
  *   4. SHADOW ⇒ per attempted op: emit CONFIRMED `shadow.role.rejected.v1`, then
  *      fail `ShadowGateRejected`. The inner writer is invoked ZERO times.
  *   5. LIVE ⇒ per op (skipping ops already `ok` from a prior run — idempotent
  *      reconciliation): emit + CONFIRM `shadow.role.intent.v1` BEFORE the write
  *      (a failed confirm ⇒ `WriteError("audit_unavailable")`, write does NOT
- *      run); create-ops run inside the per-world lock (B10) with check-then-
- *      create against the `roles_created` ledger; emit `shadow.role.applied.v1`
- *      after success; record per-op status + the ledger.
+ *      run); create-ops run inside the per-world lock (B10) and the inner
+ *      `RoleWriter.createRole` is CHECK-THEN-CREATE against live state, so the
+ *      lock-serialized span dedups creates ACROSS concurrent same-world batches
+ *      (the cross-batch B10 guarantee — NOT dependent on the caller threading a
+ *      prior ledger); emit `shadow.role.applied.v1` after success (a failed
+ *      applied-confirm marks the op `applied_audit_failed`, never silently `ok`);
+ *      record per-op status + the ledger.
  */
 import { Context, Effect, Layer, Ref } from 'effect';
 import {
@@ -45,6 +61,7 @@ import type {
 import { RoleWriter } from '../ports/index.js';
 import { AcvpEmitter } from './acvp-emitter.js';
 import { WorldLock } from './world-lock.js';
+import { resolveAuthz, AdminAllowlistSource } from './resolve-authz.js';
 import {
   SHADOW_ROLE_REJECTED,
   SHADOW_ROLE_INTENT,
@@ -74,7 +91,9 @@ export interface GateCheckedRoleWriterService {
   ) => Effect.Effect<
     ApplyBatchResult,
     WriteError | ShadowGateRejected,
-    RoleWriter | AcvpEmitter | WorldLock
+    // `AdminAllowlistSource` is REQUIRED (CRITICAL-2): the LIVE path re-resolves
+    // authz server-side (fresh allowlist re-check) before the write loop.
+    RoleWriter | AcvpEmitter | WorldLock | AdminAllowlistSource
   >;
 }
 
@@ -102,21 +121,37 @@ function intentFields(op: WriteOp): {
  * confused-deputy + replay guard). Fails `WriteError("op_failed")` with a clear
  * message — these are NOT transient, NOT rate-limit, and NOT a SHADOW rejection;
  * a binding mismatch is a hard refusal.
+ *
+ * MAJOR-4: ALL FOUR of {current map hash, capability report_hash, BATCH
+ * report_hash, batch authz report_hash} must agree. Binding only the
+ * `authz.report_hash` (and not `batch.report_hash`) left a hole where a batch
+ * could field-match authz/cap to the current map while emitting
+ * `shadow.role.intent.v1` with a DIFFERENT `batch.report_hash`. The intent event
+ * carries `batch.report_hash`, so the audit trail must be bound to the SAME hash.
  */
 function assertAuthzBound(
   authz: AuthzContext,
   cap: WriteCapability,
+  batchReportHash: string,
   currentMapHash: string,
 ): Effect.Effect<void, WriteError> {
   if (authz.report_hash !== currentMapHash) {
     return Effect.fail(
       new WriteError({
         kind: 'op_failed',
-        message: `authz binding: batch report_hash ≠ current map hash (stale/unbound batch)`,
+        message: `authz binding: batch authz.report_hash ≠ current map hash (stale/unbound batch)`,
       }),
     );
   }
-  if (authz.report_hash !== cap.report_hash) {
+  if (authz.report_hash !== batchReportHash) {
+    return Effect.fail(
+      new WriteError({
+        kind: 'op_failed',
+        message: `authz binding: batch authz.report_hash ≠ batch.report_hash (the audited intent would carry a different hash than the authorization)`,
+      }),
+    );
+  }
+  if (batchReportHash !== cap.report_hash) {
     return Effect.fail(
       new WriteError({
         kind: 'op_failed',
@@ -158,8 +193,13 @@ function assertAuthzBound(
  *                 CURRENT map (not a captured value).
  *
  * The inner `RoleWriter`, `AcvpEmitter`, and `WorldLock` are pulled from context
- * (the actor supplies them as Layers) — this Layer composes them; it does NOT
- * capture them at build time in a way that bypasses the gate.
+ * at BUILD time (the actor supplies them as Layers) — this Layer composes them;
+ * it does NOT capture them in a way that bypasses the gate. `AdminAllowlistSource`
+ * is pulled at INVOCATION time inside `applyBatch`'s LIVE path (via `resolveAuthz`)
+ * for the fresh write-boundary allowlist re-check (CRITICAL-2) — it is therefore
+ * in the SERVICE method's requirement channel, not in this Layer's build deps.
+ * Downstream Layer wiring (S4) MUST provide `AdminAllowlistSource` wherever
+ * `applyBatch` is run, in addition to RoleWriter/AcvpEmitter/WorldLock.
  */
 export function makeGateCheckedRoleWriter(
   mode: ModeControl,
@@ -219,8 +259,41 @@ export function makeGateCheckedRoleWriter(
                 );
               }
 
-              // LIVE path. First the confused-deputy / replay guard (B3/B14).
-              yield* assertAuthzBound(batch.authz, cap, currentMapHash());
+              // LIVE path. First the confused-deputy / replay BINDING guard
+              // (B3/B14): bind authz ↔ cap ↔ batch.report_hash ↔ current map.
+              yield* assertAuthzBound(batch.authz, cap, batch.report_hash, currentMapHash());
+
+              // CRITICAL-2: FRESH server-side allowlist re-check at the WRITE
+              // BOUNDARY (SDD §6.2 — "actor still allowlisted"). Re-resolve authz
+              // bypassing the cache; deny ⇒ refuse the write (no inner call). This
+              // catches a mid-batch admin REVOCATION (B4) and a forged capability
+              // whose authz fields were self-reported to match. It is IN ADDITION
+              // to the binding guard above (which stays — that is the replay /
+              // confused-deputy bind to the go_live decision). The `evaluatedAt`
+              // is the batch's already-verified token timestamp (no clock read in
+              // the substrate).
+              const freshDecision = yield* resolveAuthz({
+                actor: batch.authz.actor,
+                world: batch.world,
+                evaluatedAt: batch.authz.token_metadata.verified_at,
+                bypassCache: true,
+              }).pipe(
+                Effect.mapError(
+                  (e) =>
+                    new WriteError({
+                      kind: 'op_failed',
+                      message: `authz re-check failed at write boundary: ${e.message}`,
+                    }),
+                ),
+              );
+              if (freshDecision.decision !== 'grant') {
+                return yield* Effect.fail(
+                  new WriteError({
+                    kind: 'op_failed',
+                    message: `actor no longer allowlisted at write boundary (revoked/forged authz) — write refused (${freshDecision.reason})`,
+                  }),
+                );
+              }
 
               return yield* applyLiveBatch({
                 batch,
@@ -330,10 +403,19 @@ function applyLiveBatch(
       );
 
       if (opResult.ok) {
-        opStatus.push({ op_id: op.op_id, status: 'ok' });
-        // applied event AFTER a successful write.
+        // applied event AFTER a successful write. The write already happened (the
+        // role is in `ledger`), but post-write audit COMPLETENESS is part of the
+        // contract: a confirmed `shadow.role.applied.v1` must exist for an `ok`
+        // op (MAJOR-5). If the applied-confirm FAILS, we do NOT silently keep the
+        // op `ok` — we record it as `failed` with an `applied_audit_failed:`
+        // error so the batch outcome reflects the missing audit record (the
+        // batch flips `done`→`partial_failure`). The role stays in `roles_created`
+        // so a RETRY recognizes the write happened and re-emits the applied audit
+        // (idempotent reconciliation) rather than re-creating. The
+        // intent-confirm-BEFORE-write stays the hard gate (no un-audited write);
+        // this tightens post-write completeness.
         const roleId = opResult.roleId;
-        yield* emitConfirmed({
+        const appliedConfirm = yield* emitConfirmed({
           event_type: SHADOW_ROLE_APPLIED,
           payload: {
             world: batch.world,
@@ -345,12 +427,19 @@ function applyLiveBatch(
             actor: batch.authz.actor,
           },
         }).pipe(
-          // an applied-event confirm failure does not un-do the write; record it
-          // but keep the op `ok` (the write already happened + the intent is
-          // audited). Surface as a failed op only if you want stricter semantics;
-          // MVP keeps the op ok and ignores the post-write audit hiccup.
-          Effect.catchAll(() => Effect.void),
+          Effect.as({ confirmed: true as const }),
+          Effect.catchAll((e) => Effect.succeed({ confirmed: false as const, error: e.message })),
         );
+
+        if (appliedConfirm.confirmed) {
+          opStatus.push({ op_id: op.op_id, status: 'ok' });
+        } else {
+          opStatus.push({
+            op_id: op.op_id,
+            status: 'failed',
+            error: `applied_audit_failed: write succeeded but the shadow.role.applied.v1 confirm failed — audit record incomplete: ${appliedConfirm.error}`,
+          });
+        }
       } else {
         opStatus.push({ op_id: op.op_id, status: 'failed', error: opResult.error });
       }
@@ -381,27 +470,46 @@ interface RunOpDeps {
 }
 
 /**
- * Run a single op. `create_role` runs inside the per-world lock with
- * check-then-create against the ledger (B10) — exactly one create per role_key
- * per world even under concurrent batches. `assign_role` is naturally idempotent
- * (re-assign is a no-op at Discord) and needs no world lock. Returns the role id
- * (the created/looked-up id for creates; an empty `RoleId` for assigns since the
- * port's assign returns void).
+ * Run a single op. `assign_role` is naturally idempotent (re-assign is a no-op
+ * at Discord) and needs no world lock.
+ *
+ * `create_role` (B10 TOCTOU — CRITICAL-1): the GET-then-create span runs INSIDE
+ * the per-world lock, and the inner `RoleWriter.createRole` is itself CHECK-THEN-
+ * CREATE against LIVE state (the port contract — see ports/index.ts). The
+ * cross-batch "exactly one create per role_key per world" guarantee is the
+ * COMPOSITION of those two facts: the world-lock serializes batch A's and batch
+ * B's create spans, and inside its span batch B's `inner.createRole` GETs a live
+ * roleset that ALREADY contains the role batch A created, so it reuses A's id
+ * WITHOUT a second create. This holds EVEN when each batch's per-invocation
+ * `ledgerByKey` is empty (two fresh concurrent batches) — the guarantee does NOT
+ * depend on the caller threading a prior ledger or holding an external mutex.
+ *
+ * The per-batch `ledgerByKey` check below is an ADDITIONAL same-batch / retry
+ * fast-path (skip the live GET when THIS batch — or a prior run threaded via
+ * `priorState` — already created the role); it does NOT pre-empt the live
+ * check for a key this batch hasn't yet created, so it never skips the
+ * cross-batch live dedup. Returns the created/reused id for creates; `undefined`
+ * for assigns (the port's assign returns void).
  */
 function runOp(deps: RunOpDeps): Effect.Effect<RoleId | undefined, WriteError> {
   const { op, cap, world, inner, worldLock, ledgerByKey, ledger } = deps;
 
   if (op.kind === 'create_role') {
-    // Serialize the entire check-then-create span per world (B10).
+    // Serialize the entire GET-then-create span per world (B10). The inner
+    // createRole's own check-then-create against live state is what dedups
+    // across concurrent batches once the lock serializes the spans.
     return worldLock.withWorldLock(
       world,
       Effect.gen(function* () {
-        // check: a role already created for this key? reuse it (idempotent).
+        // same-batch / retry fast-path: a role already created for this key in
+        // THIS batch (or threaded via priorState)? reuse it without a live GET.
         const existing = ledgerByKey.get(op.intent.role_key);
         if (existing !== undefined) {
           return existing.role_id;
         }
-        // create.
+        // check-then-create against LIVE state (port contract). For a concurrent
+        // same-world batch, this GETs the first batch's role and reuses its id —
+        // the cross-batch dedup. The lock guarantees we observe that role.
         const roleId = yield* inner.createRole(cap, op.intent as never).pipe(
           // a ShadowGateRejected from the inner LIVE writer should never happen
           // (we only get here under LIVE); normalize it to op_failed.

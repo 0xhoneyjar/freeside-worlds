@@ -88,6 +88,7 @@ export {
   rosterFingerprint,
   evalRosterFreshness,
   newlyArrivedCount,
+  netRosterChangeCount,
   ROSTER_DRIFT_THRESHOLD_DEFAULT,
   AcvpEmitter,
   WorldLock,

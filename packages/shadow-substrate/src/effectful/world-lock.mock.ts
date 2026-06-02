@@ -58,3 +58,18 @@ export function makeInMemoryWorldLock(): Layer.Layer<WorldLock> {
     }),
   );
 }
+
+/**
+ * A NO-OP `WorldLock` Layer — `withWorldLock(world, effect)` just runs `effect`
+ * with NO serialization. This is the B10 NEGATIVE CONTROL (§8.4): with the lock
+ * disabled, two concurrent same-world create spans interleave inside the
+ * widened check-then-create window and BOTH create (2 creates). It proves the
+ * positive test's single-create result is a real effect of the world-lock, not a
+ * tautology. NEVER use in production — the lock is the cross-batch B10 guard.
+ */
+export function makeNoopWorldLock(): Layer.Layer<WorldLock> {
+  return Layer.succeed(WorldLock, {
+    withWorldLock: <A, E>(_world: WorldSlug, effect: Effect.Effect<A, E>) =>
+      effect as Effect.Effect<A, E | WriteError>,
+  });
+}

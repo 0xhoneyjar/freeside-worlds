@@ -55,17 +55,30 @@ export type ShadowEventType = S.Schema.Type<typeof ShadowEventType>;
 // ─── Payload shapes ──────────────────────────────────────────────────────────
 
 /**
- * The role-write intent carried in the role.* events. Kept narrow: the op kind
- * + the role_key + (for assigns) the member id. Mirrors `WriteOp` semantics
- * without re-exporting the full batch shape into the audit payload.
+ * The SHARED role-op fields every `shadow.role.*` payload carries — the SINGLE
+ * SOURCE OF TRUTH for `{world, op_id, kind, role_key, member_id}` (CLEANUP 2 /
+ * FAGAN iter-2). Each concrete event SPREADS these fields into its own `S.Struct`
+ * and adds only its discriminating field(s) (`apply_mode`, `report_hash`,
+ * `role_id` + `actor`). A plain field-record spread (NOT `S.extend`) is used
+ * deliberately so every concrete payload stays a flat `S.Struct` whose `.fields`
+ * the conformance check (`structKeys`) reads directly — `S.extend` wraps the AST
+ * and hides `.fields`, which would silently break the B7 shape-skew guard.
+ * Kept narrow: the op kind + role_key + (for assigns) member id. Mirrors
+ * `WriteOp` semantics without re-exporting the full batch shape into the payload.
  */
-export const ShadowRoleIntentPayload = S.Struct({
+export const shadowRoleBaseFields = {
   world: WorldSlug,
   op_id: S.String,
   kind: S.Literal('create_role', 'assign_role'),
   role_key: S.String,
   member_id: S.optional(S.String),
-});
+} as const;
+
+/**
+ * The role-write intent carried in the role.* events (the base shape, exported
+ * for back-compat / consumer reference). Equal to the shared base fields.
+ */
+export const ShadowRoleIntentPayload = S.Struct({ ...shadowRoleBaseFields });
 export type ShadowRoleIntentPayload = S.Schema.Type<typeof ShadowRoleIntentPayload>;
 
 /**
@@ -74,11 +87,7 @@ export type ShadowRoleIntentPayload = S.Schema.Type<typeof ShadowRoleIntentPaylo
  * "SHADOW ⇒ zero writes" provable from the trace (SDD §4.4.5/§8.4).
  */
 export const ShadowRoleRejectedPayload = S.Struct({
-  world: WorldSlug,
-  op_id: S.String,
-  kind: S.Literal('create_role', 'assign_role'),
-  role_key: S.String,
-  member_id: S.optional(S.String),
+  ...shadowRoleBaseFields,
   apply_mode: S.Literal('SHADOW'),
 });
 export type ShadowRoleRejectedPayload = S.Schema.Type<typeof ShadowRoleRejectedPayload>;
@@ -89,22 +98,14 @@ export type ShadowRoleRejectedPayload = S.Schema.Type<typeof ShadowRoleRejectedP
  * go_live report.
  */
 export const ShadowRoleIntentEventPayload = S.Struct({
-  world: WorldSlug,
-  op_id: S.String,
-  kind: S.Literal('create_role', 'assign_role'),
-  role_key: S.String,
-  member_id: S.optional(S.String),
+  ...shadowRoleBaseFields,
   report_hash: Hex64,
 });
 export type ShadowRoleIntentEventPayload = S.Schema.Type<typeof ShadowRoleIntentEventPayload>;
 
 /** `shadow.role.applied.v1` — the LIVE write succeeded. */
 export const ShadowRoleAppliedPayload = S.Struct({
-  world: WorldSlug,
-  op_id: S.String,
-  kind: S.Literal('create_role', 'assign_role'),
-  role_key: S.String,
-  member_id: S.optional(S.String),
+  ...shadowRoleBaseFields,
   /** the created role id (for create_role ops) / the assigned role id. */
   role_id: S.optional(S.String),
   actor: S.String,

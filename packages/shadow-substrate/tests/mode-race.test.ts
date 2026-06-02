@@ -24,8 +24,13 @@ import { makeModeControl } from '../src/effectful/mode-control.js';
 import { rollback } from '../src/effectful/go-live.js';
 import { makeRecordingEmitter } from '../src/effectful/acvp-emitter.mock.js';
 import { makeInMemoryWorldLock } from '../src/effectful/world-lock.mock.js';
+import { makeInMemoryAllowlist } from '../src/effectful/resolve-authz.mock.js';
 import { makeRecordingRoleWriter } from './helpers/mock-role-writer.js';
 import { batch, capabilityFor, createOp, assignOp, HASH_A, TEST_WORLD } from './helpers/batch.js';
+
+// The batch helper's default actor — granted so the LIVE write-boundary
+// re-check (CRITICAL-2) passes in these mode-race scenarios.
+const BATCH_ACTOR = 'cm-actor-1';
 
 describe('B5 — inverse mode-race: rollback serializes to the batch boundary', () => {
   test('rollback racing an in-flight LIVE batch ⇒ batch completes all writes; SHADOW flip lands AFTER', async () => {
@@ -37,10 +42,12 @@ describe('B5 — inverse mode-race: rollback serializes to the batch boundary', 
     const { layer: emitterLayer } = makeRecordingEmitter();
     const lockLayer = makeInMemoryWorldLock();
 
+    const { layer: allowlistLayer } = makeInMemoryAllowlist({ [TEST_WORLD]: [BATCH_ACTOR] });
+
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const mode = yield* makeModeControl('LIVE');
-        const base = Layer.mergeAll(writerLayer, emitterLayer, lockLayer);
+        const base = Layer.mergeAll(writerLayer, emitterLayer, lockLayer, allowlistLayer);
         const gateLayer = makeGateCheckedRoleWriter(mode, () => HASH_A);
         const env = Layer.provideMerge(gateLayer, base);
 
@@ -95,10 +102,12 @@ describe('B5 — inverse mode-race: rollback serializes to the batch boundary', 
     const { layer: emitterLayer } = makeRecordingEmitter();
     const lockLayer = makeInMemoryWorldLock();
 
+    const { layer: allowlistLayer } = makeInMemoryAllowlist({ [TEST_WORLD]: [BATCH_ACTOR] });
+
     await Effect.runPromise(
       Effect.gen(function* () {
         const mode = yield* makeModeControl('LIVE');
-        const base = Layer.mergeAll(writerLayer, emitterLayer, lockLayer);
+        const base = Layer.mergeAll(writerLayer, emitterLayer, lockLayer, allowlistLayer);
         const gateLayer = makeGateCheckedRoleWriter(mode, () => HASH_A);
         const env = Layer.provideMerge(gateLayer, base);
 

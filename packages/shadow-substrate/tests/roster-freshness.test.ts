@@ -7,6 +7,7 @@ import { Effect, Exit, Cause } from 'effect';
 import {
   rosterFingerprint,
   newlyArrivedCount,
+  netRosterChangeCount,
   evalRosterFreshness,
   ROSTER_DRIFT_THRESHOLD_DEFAULT,
 } from '../src/effectful/roster-freshness.js';
@@ -41,9 +42,25 @@ describe('newlyArrivedCount (PURE)', () => {
     const fresh = { member_ids: ['m1', 'm2', 'm3', 'm4', 'm5'], role_ids: ['r1', 'r2'] };
     expect(newlyArrivedCount(BASE, fresh)).toBe(2);
   });
-  test('leaving members do not count as drift', () => {
+  test('leaving members do not count as ARRIVALS (newlyArrivedCount is arrivals-only)', () => {
     const fresh = { member_ids: ['m1'], role_ids: ['r1', 'r2'] };
     expect(newlyArrivedCount(BASE, fresh)).toBe(0);
+  });
+});
+
+describe('netRosterChangeCount (PURE — arrivals + departures + role-id churn, MAJOR-6)', () => {
+  test('counts arrivals AND departures', () => {
+    // base m1,m2,m3 ; fresh m1,m4 ⇒ departures {m2,m3} + arrivals {m4} = 3
+    const fresh = { member_ids: ['m1', 'm4'], role_ids: ['r1', 'r2'] };
+    expect(netRosterChangeCount(BASE, fresh)).toBe(3);
+  });
+  test('counts role-id changes (replacements)', () => {
+    // base roles r1,r2 ; fresh roles r1,r3 ⇒ depart r2 + arrive r3 = 2
+    const fresh = { member_ids: ['m1', 'm2', 'm3'], role_ids: ['r1', 'r3'] };
+    expect(netRosterChangeCount(BASE, fresh)).toBe(2);
+  });
+  test('identical snapshot ⇒ 0', () => {
+    expect(netRosterChangeCount(BASE, BASE)).toBe(0);
   });
 });
 
@@ -63,6 +80,58 @@ describe('evalRosterFreshness (B1 guard)', () => {
     const fresh = { ...BASE, member_ids: [...BASE.member_ids, 'm4'] };
     const exit = run(
       evalRosterFreshness({ baseFingerprint: fp, baseSnapshot: BASE, freshSnapshot: fresh }),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const e = (Cause.failureOption(exit.cause) as { value: GuardFailed }).value;
+      expect(e.reason).toBe('roster_drift');
+    }
+  });
+
+  test('MAJOR-6: DEPARTURES (zero new arrivals) at threshold 0 ⇒ GuardFailed("roster_drift")', () => {
+    // base m1,m2,m3 ; fresh m1,m2 (m3 LEFT, NO new arrival). The old arrivals-
+    // only count would be 0 and PASS — the fingerprint-mismatch path now catches
+    // it at threshold 0 (any role-relevant change forces a re-preview).
+    const fp = rosterFingerprint(BASE);
+    const fresh = { ...BASE, member_ids: ['m1', 'm2'] };
+    expect(newlyArrivedCount(BASE, fresh)).toBe(0); // arrivals-only would miss it
+    const exit = run(
+      evalRosterFreshness({ baseFingerprint: fp, baseSnapshot: BASE, freshSnapshot: fresh }),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const e = (Cause.failureOption(exit.cause) as { value: GuardFailed }).value;
+      expect(e.reason).toBe('roster_drift');
+    }
+  });
+
+  test('MAJOR-6: ROLE-ID change / replacement (zero member arrivals) at threshold 0 ⇒ roster_drift', () => {
+    // members unchanged; a role id was replaced (r2 → r3). Arrivals-only = 0.
+    const fp = rosterFingerprint(BASE);
+    const fresh = { member_ids: BASE.member_ids, role_ids: ['r1', 'r3'] };
+    expect(newlyArrivedCount(BASE, fresh)).toBe(0);
+    const exit = run(
+      evalRosterFreshness({ baseFingerprint: fp, baseSnapshot: BASE, freshSnapshot: fresh }),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const e = (Cause.failureOption(exit.cause) as { value: GuardFailed }).value;
+      expect(e.reason).toBe('roster_drift');
+    }
+  });
+
+  test('MAJOR-6: threshold > 0 counts NET change (a departure + an arrival = 2 > 1 ⇒ drift)', () => {
+    // base m1,m2,m3 ; fresh m1,m2,m4 (m3 left, m4 joined) = net 2 changes.
+    // threshold 1 allows ≤1 net change, so net 2 must fail.
+    const fp = rosterFingerprint(BASE);
+    const fresh = { ...BASE, member_ids: ['m1', 'm2', 'm4'] };
+    const exit = run(
+      evalRosterFreshness({
+        baseFingerprint: fp,
+        baseSnapshot: BASE,
+        freshSnapshot: fresh,
+        threshold: 1,
+      }),
     );
     expect(Exit.isFailure(exit)).toBe(true);
     if (Exit.isFailure(exit)) {

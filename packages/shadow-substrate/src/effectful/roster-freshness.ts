@@ -58,14 +58,15 @@ export function rosterFingerprint(snapshot: RosterIdentitySnapshot): Hex64 {
 }
 
 /**
- * PURE. The drift count = how many members present in `fresh` are NOT present in
- * `base` (newly-arrived members). The B1 guard fires on NEWLY-QUALIFYING members;
- * in the MVP the qualification predicate is opaque (score-api owns it, #221), so
- * the substrate computes the conservative upper bound — newly-PRESENT members —
- * which over-approximates newly-qualifying. With the default threshold 0 this is
- * exactly "any new member forces a re-preview", the conservative MVP posture
- * (SDD §6.2). A consumer that can resolve per-member qualification may pass a
- * pre-filtered `fresh.member_ids` (only newly-qualifying) to tighten it.
+ * PURE. The count of newly-ARRIVED members (present in `fresh`, absent in
+ * `base`). The B1 guard fires on NEWLY-QUALIFYING members; in the MVP the
+ * qualification predicate is opaque (score-api owns it, #221), so the substrate
+ * computes the conservative upper bound — newly-PRESENT members — which
+ * over-approximates newly-qualifying. A consumer that can resolve per-member
+ * qualification may pass a pre-filtered `fresh.member_ids` (only newly-
+ * qualifying) to tighten it. NOTE: this counts ARRIVALS ONLY; for the drift
+ * threshold the net role-relevant change (arrivals AND departures AND role-id
+ * changes) is what matters — see `netRosterChangeCount` / `evalRosterFreshness`.
  */
 export function newlyArrivedCount(
   base: RosterIdentitySnapshot,
@@ -77,6 +78,31 @@ export function newlyArrivedCount(
     if (!baseMembers.has(id)) count += 1;
   }
   return count;
+}
+
+/**
+ * PURE. The NET role-relevant roster change between `base` and `fresh`: the
+ * symmetric-difference of the member-id sets PLUS the symmetric-difference of
+ * the role-id sets. This counts ARRIVALS, DEPARTURES, AND role-id changes
+ * (replacements) — NOT arrivals alone. It is the threshold>0 drift metric (the
+ * threshold=0 path short-circuits on any fingerprint mismatch and never reaches
+ * this). Counting departures/role-changes closes the B1 hole where a roster that
+ * drifted via departures or role-id churn (zero new arrivals) would have passed
+ * the old arrivals-only count.
+ */
+export function netRosterChangeCount(
+  base: RosterIdentitySnapshot,
+  fresh: RosterIdentitySnapshot,
+): number {
+  const symDiff = (a: ReadonlyArray<string>, b: ReadonlyArray<string>): number => {
+    const setA = new Set(a);
+    const setB = new Set(b);
+    let n = 0;
+    for (const id of setA) if (!setB.has(id)) n += 1; // departures
+    for (const id of setB) if (!setA.has(id)) n += 1; // arrivals
+    return n;
+  };
+  return symDiff(base.member_ids, fresh.member_ids) + symDiff(base.role_ids, fresh.role_ids);
 }
 
 export interface RosterFreshnessInput {
@@ -93,11 +119,20 @@ export interface RosterFreshnessInput {
 /**
  * PURE roster-freshness re-evaluation (B1). Returns an `Effect` over the typed
  * `GuardFailed("roster_drift")` channel so it composes with `transition` and the
- * gated writer:
- *   - fingerprint matches ⇒ no drift ⇒ succeed.
- *   - fingerprint differs ⇒ compute the newly-arrived delta; fail
- *     `GuardFailed("roster_drift")` iff the delta exceeds the threshold; else
- *     succeed (a drift within threshold is allowed).
+ * gated writer. Semantics, by threshold:
+ *
+ *   - **threshold = 0 (the conservative MVP default, §6.2):** ANY fingerprint
+ *     mismatch between the base and the fresh roster forces a re-preview. The
+ *     fingerprint covers `member_ids ⊕ role_ids`, so a roster that changed via
+ *     DEPARTURES, role-id changes, or replacements (even with ZERO new arrivals)
+ *     produces a mismatched fingerprint and `GuardFailed("roster_drift")`. This
+ *     closes the FAGAN iter-2 MAJOR-6 hole: keying drift off newly-arrived
+ *     members alone let departures/replacements slip past at threshold 0.
+ *   - **threshold > 0 (operator-tunable):** compute the NET role-relevant change
+ *     (arrivals AND departures AND role-id changes, `netRosterChangeCount`) and
+ *     fail iff it exceeds the threshold; a drift within threshold is allowed.
+ *
+ * If the fingerprint MATCHES, there is no drift regardless of threshold.
  *
  * This is a go_live-time re-eval, NOT a version-hash field: it never flaps a
  * stored hash and never blocks bind_map/preview.
@@ -108,17 +143,26 @@ export function evalRosterFreshness(
   const threshold = input.threshold ?? ROSTER_DRIFT_THRESHOLD_DEFAULT;
   const freshFingerprint = rosterFingerprint(input.freshSnapshot);
   if (freshFingerprint === input.baseFingerprint) {
-    return Effect.void; // no drift
+    return Effect.void; // no drift — identical coarse identity (members ⊕ roles)
   }
-  const delta = newlyArrivedCount(input.baseSnapshot, input.freshSnapshot);
-  if (delta > threshold) {
-    return Effect.fail(
-      new GuardFailed({
-        reason: 'roster_drift',
-        message:
-          'the roster moved since you previewed — re-preview before going live',
-      }),
-    );
+
+  const driftFailure = new GuardFailed({
+    reason: 'roster_drift',
+    message: 'the roster moved since you previewed — re-preview before going live',
+  });
+
+  // threshold 0: ANY fingerprint mismatch is drift (arrivals, departures,
+  // role-id changes, replacements all change the fingerprint). The conservative
+  // B1 posture — any role-relevant roster change forces a re-preview.
+  if (threshold <= 0) {
+    return Effect.fail(driftFailure);
+  }
+
+  // threshold > 0: allow a bounded NET change (arrivals + departures + role-id
+  // churn), not arrivals alone.
+  const netChange = netRosterChangeCount(input.baseSnapshot, input.freshSnapshot);
+  if (netChange > threshold) {
+    return Effect.fail(driftFailure);
   }
   return Effect.void; // drift within threshold
 }
