@@ -134,6 +134,8 @@ export {
   TransitionEvent,
   CreateRoleIntent,
   AssignRoleIntent,
+  RevokeRoleIntent,
+  RenameRoleIntent,
   WriteOpKind,
   WriteOp,
   RosterVersion,
@@ -148,6 +150,8 @@ export type { WriteCapability, GuardInputs } from './src/types.js';
 // ─── Config-surface payload schemas (authored in-package; S2 re-exports) ────
 export {
   RoleRule,
+  RoleOwner,
+  roleOwnerOf,
   ScaffoldingConfig,
   RoleMapConfig,
   ApplyModeConfig,

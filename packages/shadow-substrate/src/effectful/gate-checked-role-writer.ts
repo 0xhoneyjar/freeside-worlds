@@ -136,12 +136,18 @@ export class GateCheckedRoleWriter extends Context.Tag('shadow/GateCheckedRoleWr
 /** Map an op to the audit payload's intent fields. */
 function intentFields(op: WriteOp): {
   op_id: string;
-  kind: 'create_role' | 'assign_role';
+  kind: 'create_role' | 'assign_role' | 'revoke_role' | 'rename_role';
   role_key: string;
   member_id?: string;
 } {
+  // member_id is carried by the per-member ops (assign + revoke); create/rename
+  // are role-level and have none. cycle-010 (FR-9): revoke also carries member_id.
+  // `WriteOp` is now a discriminated union on `kind` (the /fagan fix), so
+  // narrowing on `kind` types `op.intent` precisely — NO cast needed.
   const member_id =
-    op.kind === 'assign_role' ? (op.intent as { member_id: string }).member_id : undefined;
+    op.kind === 'assign_role' || op.kind === 'revoke_role'
+      ? op.intent.member_id
+      : undefined;
   return { op_id: op.op_id, kind: op.kind, role_key: op.intent.role_key, member_id };
 }
 
@@ -546,7 +552,13 @@ interface RunOpDeps {
  * `priorState` — already created the role); it does NOT pre-empt the live
  * check for a key this batch hasn't yet created, so it never skips the
  * cross-batch live dedup. Returns the created/reused id for creates; `undefined`
- * for assigns (the port's assign returns void).
+ * for assigns/revokes/renames (those port methods return void).
+ *
+ * cycle-010 (FR-9/FR-10): `revoke_role` + `rename_role` are NATURALLY idempotent
+ * at Discord (removing an absent role / renaming to the same name is a no-op),
+ * exactly like `assign_role` — so they take NO world lock and dispatch to the
+ * inner writer's `revokeRole`/`renameRole`. Only `create_role` needs the world
+ * lock (the B10 GET-then-create span).
  */
 function runOp(deps: RunOpDeps): Effect.Effect<RoleId | undefined, WriteError> {
   const { op, cap, world, inner, worldLock, ledgerByKey, ledger } = deps;
@@ -567,7 +579,9 @@ function runOp(deps: RunOpDeps): Effect.Effect<RoleId | undefined, WriteError> {
         // check-then-create against LIVE state (port contract). For a concurrent
         // same-world batch, this GETs the first batch's role and reuses its id —
         // the cross-batch dedup. The lock guarantees we observe that role.
-        const roleId = yield* inner.createRole(cap, op.intent as never).pipe(
+        // `op.intent` is narrowed to `CreateRoleIntent` by the `kind` guard
+        // (discriminated union — /fagan fix), so NO cast is needed.
+        const roleId = yield* inner.createRole(cap, op.intent).pipe(
           // a ShadowGateRejected from the inner LIVE writer should never happen
           // (we only get here under LIVE); normalize it to op_failed.
           Effect.catchTag('ShadowGateRejected', (e) =>
@@ -582,11 +596,34 @@ function runOp(deps: RunOpDeps): Effect.Effect<RoleId | undefined, WriteError> {
     );
   }
 
-  // assign_role — idempotent; no world lock needed.
-  return inner.assignRole(cap, op.intent as never).pipe(
-    Effect.catchTag('ShadowGateRejected', (e) =>
-      Effect.fail(new WriteError({ kind: 'op_failed', message: e.message })),
-    ),
-    Effect.as(undefined),
-  );
+  // The idempotent, lock-free per-member / role-rename ops. Each dispatches to
+  // its inner port method; a ShadowGateRejected from the inner LIVE writer
+  // should never happen here (we only reach this under LIVE) — normalize it to
+  // op_failed, exactly as the assign path always has.
+  const normalize = <A>(e: Effect.Effect<A, WriteError | ShadowGateRejected>) =>
+    e.pipe(
+      Effect.catchTag('ShadowGateRejected', (g) =>
+        Effect.fail(new WriteError({ kind: 'op_failed', message: g.message })),
+      ),
+      Effect.as(undefined),
+    );
+
+  if (op.kind === 'revoke_role') {
+    // FR-9: revoke ONE member from a role. Idempotent; no world lock.
+    // `op.intent` is narrowed to `RevokeRoleIntent` by the `kind` guard.
+    return normalize(inner.revokeRole(cap, op.intent));
+  }
+
+  if (op.kind === 'rename_role') {
+    // FR-10: archive-by-rename. Idempotent; no world lock.
+    // `op.intent` is narrowed to `RenameRoleIntent` by the `kind` guard.
+    return normalize(inner.renameRole(cap, op.intent));
+  }
+
+  // assign_role — idempotent; no world lock needed. FR-11: the OPTIONAL
+  // `role_id` rides on the intent and is threaded verbatim to the inner adapter
+  // (the live adapter re-verifies the role_key→role_id binding when present);
+  // the substrate gate does not interpret it — it stays an opaque pass-through.
+  // `op.intent` is narrowed to `AssignRoleIntent` (the only remaining member).
+  return normalize(inner.assignRole(cap, op.intent));
 }

@@ -26,17 +26,32 @@
 import { Context, Effect, Layer } from 'effect';
 import { RoleWriter } from '../../src/ports/index.js';
 import { WriteError } from '../../src/errors.js';
-import type { CreateRoleIntent, AssignRoleIntent, RoleId, WriteCapability } from '../../src/types.js';
+import type {
+  CreateRoleIntent,
+  AssignRoleIntent,
+  RevokeRoleIntent,
+  RenameRoleIntent,
+  RoleId,
+  WriteCapability,
+} from '../../src/types.js';
 
 export interface WriterRecorder {
   /** every ACTUAL createRole that produced a NEW role, in order (reuses excluded). */
   readonly creates: Array<{ role_key: string }>;
   /** every assignRole call, in order. */
   readonly assigns: Array<{ role_key: string; member_id: string }>;
-  /** total inner-writer invocations that produced an effect (creates + assigns). */
+  /** cycle-010 FR-9: every revokeRole call, in order. */
+  readonly revokes: Array<{ role_key: string; role_id: string; member_id: string }>;
+  /** cycle-010 FR-10: every renameRole call, in order. */
+  readonly renames: Array<{ role_key: string; role_id: string; new_display_name: string }>;
+  /** total inner-writer invocations that produced an effect (create+assign+revoke+rename). */
   invocationCount(): number;
   /** number of NEW roles created for a key (idempotent reuses do NOT count). */
   createCountFor(role_key: string): number;
+  /** cycle-010: number of revoke calls for a (role_key, member_id) pair. */
+  revokeCountFor(role_key: string, member_id: string): number;
+  /** cycle-010: number of rename calls for a role_key. */
+  renameCountFor(role_key: string): number;
 }
 
 export interface MockWriterOptions {
@@ -66,6 +81,8 @@ export function makeRecordingRoleWriter(opts: MockWriterOptions = {}): {
 } {
   const creates: Array<{ role_key: string }> = [];
   const assigns: Array<{ role_key: string; member_id: string }> = [];
+  const revokes: Array<{ role_key: string; role_id: string; member_id: string }> = [];
+  const renames: Array<{ role_key: string; role_id: string; new_display_name: string }> = [];
   // Track one-shot failures consumed.
   const failedOnce = new Set<string>();
   // The SHARED roleset — the stand-in for the live Discord guild roles. The
@@ -77,8 +94,13 @@ export function makeRecordingRoleWriter(opts: MockWriterOptions = {}): {
   const recorder: WriterRecorder = {
     creates,
     assigns,
-    invocationCount: () => creates.length + assigns.length,
+    revokes,
+    renames,
+    invocationCount: () => creates.length + assigns.length + revokes.length + renames.length,
     createCountFor: (role_key) => creates.filter((c) => c.role_key === role_key).length,
+    revokeCountFor: (role_key, member_id) =>
+      revokes.filter((r) => r.role_key === role_key && r.member_id === member_id).length,
+    renameCountFor: (role_key) => renames.filter((r) => r.role_key === role_key).length,
   };
 
   const service: Context.Tag.Service<RoleWriter> = {
@@ -133,6 +155,45 @@ export function makeRecordingRoleWriter(opts: MockWriterOptions = {}): {
           );
         }
         assigns.push({ role_key: intent.role_key, member_id: intent.member_id });
+        return undefined;
+      }),
+    // cycle-010 FR-9: revoke ONE member from a role. Records + honors the same
+    // one-shot / rate-limit injection so the partial-failure tests cover it too.
+    revokeRole: (_cap: WriteCapability, intent: RevokeRoleIntent) =>
+      Effect.gen(function* () {
+        if (opts.rateLimitFor?.has(intent.role_key)) {
+          return yield* Effect.fail(
+            new WriteError({ kind: 'rate_limited', message: '429 from Discord' }),
+          );
+        }
+        if (opts.failOnceFor?.has(intent.role_key) && !failedOnce.has(intent.role_key)) {
+          failedOnce.add(intent.role_key);
+          return yield* Effect.fail(
+            new WriteError({ kind: 'op_failed', message: 'transient revoke failure' }),
+          );
+        }
+        revokes.push({ role_key: intent.role_key, role_id: intent.role_id, member_id: intent.member_id });
+        return undefined;
+      }),
+    // cycle-010 FR-10: archive-by-rename. Records + honors the same injection.
+    renameRole: (_cap: WriteCapability, intent: RenameRoleIntent) =>
+      Effect.gen(function* () {
+        if (opts.rateLimitFor?.has(intent.role_key)) {
+          return yield* Effect.fail(
+            new WriteError({ kind: 'rate_limited', message: '429 from Discord' }),
+          );
+        }
+        if (opts.failOnceFor?.has(intent.role_key) && !failedOnce.has(intent.role_key)) {
+          failedOnce.add(intent.role_key);
+          return yield* Effect.fail(
+            new WriteError({ kind: 'op_failed', message: 'transient rename failure' }),
+          );
+        }
+        renames.push({
+          role_key: intent.role_key,
+          role_id: intent.role_id,
+          new_display_name: intent.new_display_name,
+        });
         return undefined;
       }),
   };

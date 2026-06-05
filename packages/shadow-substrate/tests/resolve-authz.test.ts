@@ -85,6 +85,9 @@ describe('loaders — effectful roster/score reads (402.6)', () => {
     };
     const rosterLayer = Layer.succeed(RosterSource, {
       currentRoster: () => Effect.succeed(roster),
+      // cycle-010 FR-12: the new id-set port method. This loader test does not
+      // exercise it; a trivial empty snapshot satisfies the port shape.
+      currentRosterIdentity: () => Effect.succeed({ member_ids: [], role_ids: [] }),
     });
     const out = await Effect.runPromise(loadCurrentRoster(WORLD).pipe(Effect.provide(rosterLayer)));
     expect(out).toEqual(roster);

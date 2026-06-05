@@ -17,14 +17,43 @@ import { BoundedString, NonEmptyBounded, NAME_MAX, DESCRIPTION_MAX } from './pri
 // ─── Surface `role-map` — role rules + scaffolding (the proposed effect) ─────
 
 /**
+ * Ownership of a role (cycle-010 FR-3, SDD §2.3): `manual` = the CM owns it,
+ * Freeside never touches it in a plan; `freeside` = a Freeside-managed role,
+ * eligible for create/grant/revoke/rename. Ownership IS desired state, so it
+ * folds into the `roleMapVersionHash` (an ownership change correctly re-versions
+ * the map + triggers the staleness guard + the TAKEOVER ceremony, §2.3).
+ */
+export const RoleOwner = S.Literal('manual', 'freeside');
+export type RoleOwner = S.Schema.Type<typeof RoleOwner>;
+
+/**
  * A single role rule (SDD §3.2). `role_key` is the stable join key,
- * Freeside-namespaced for FR-9 coexistence. `qualifies` is the (MVP: tier)
- * qualification predicate — opaque to the substrate, evaluated by the
- * ScoreSource read-model. `create_if_absent` is role CREATION (FR-4).
+ * Freeside-namespaced for FR-9 coexistence. `display_name` (cycle-010 FR-2) is
+ * the MUTABLE Discord role name, DISTINCT from the stable `role_key` (§2.2) —
+ * the writer creates with `display_name`, resolves existing roles by frozen
+ * `role_id`, and a display_name vs recorded-name mismatch becomes a rename
+ * conflict (never a break). `qualifies` is the (MVP: tier) qualification
+ * predicate — opaque to the substrate, evaluated by the ScoreSource read-model.
+ * `create_if_absent` is role CREATION (FR-4).
  */
 export const RoleRule = S.Struct({
   role_key: NonEmptyBounded(NAME_MAX),
   display_name: NonEmptyBounded(NAME_MAX),
+  /**
+   * FR-3 (cycle-010): ownership. PLAIN-OPTIONAL so an existing role-map authored
+   * WITHOUT `owner` still decodes AND existing typed `RoleRule` literals across
+   * the cluster still compile unbroken (additivity is the invariant — a
+   * `default`-bearing `optionalWith` would make the DECODED Type require `owner`
+   * and break every existing literal). The DEFAULT is applied by the CONSUMER:
+   * `owner ?? 'manual'` — `manual` is the safe default (Freeside touches nothing
+   * unless explicitly marked `freeside`). Helper `roleOwnerOf(rule)` (below)
+   * centralizes that resolution. NOTE (§2.3 hash interaction): because absent
+   * `owner` stays `undefined` (dropped by JCS), an un-decoded map hashes
+   * IDENTICALLY to today (the frozen CANONICAL_VERSION_HASH is preserved); only
+   * a map that EXPLICITLY carries `owner` re-versions, which is the desired §2.3
+   * behavior (an ownership change is a desired-state change).
+   */
+  owner: S.optional(RoleOwner),
   qualifies: S.Struct({
     source: S.Literal('tier'),
     /** opaque tier id (score-api owns the values — #221). */
@@ -33,6 +62,16 @@ export const RoleRule = S.Struct({
   create_if_absent: S.Boolean,
 });
 export type RoleRule = S.Schema.Type<typeof RoleRule>;
+
+/**
+ * FR-3 (cycle-010) consumer-side default resolver: a rule with no explicit
+ * `owner` is `manual` (Freeside touches nothing unless explicitly marked
+ * `freeside`). Centralizing the `?? 'manual'` here keeps the default in ONE
+ * place so the 4 managed-predicate call sites (SDD §2.3) cannot drift. PURE.
+ */
+export function roleOwnerOf(rule: { readonly owner?: RoleOwner }): RoleOwner {
+  return rule.owner ?? 'manual';
+}
 
 /**
  * Bounded scaffolding structure (SDD §3.2 "scaffolding: structure to scaffold;

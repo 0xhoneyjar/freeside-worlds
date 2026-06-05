@@ -57,6 +57,54 @@ export function assignOp(role_key: string, member_id: string, report_hash: Hex64
   };
 }
 
+/** cycle-010 FR-11: an assign op carrying the OPTIONAL frozen role_id. */
+export function assignOpWithRoleId(
+  role_key: string,
+  member_id: string,
+  role_id: string,
+  report_hash: Hex64 = HASH_A,
+): WriteOp {
+  const op_id = opId('assign_role', role_key, member_id);
+  return {
+    op_id,
+    idempotency_key: idemKey(TEST_WORLD, op_id, report_hash),
+    kind: 'assign_role',
+    intent: { role_key, member_id: member_id as never, role_id: role_id as never },
+  };
+}
+
+/** cycle-010 FR-9: a revoke op (role_key, role_id, member_id). */
+export function revokeOp(
+  role_key: string,
+  role_id: string,
+  member_id: string,
+  report_hash: Hex64 = HASH_A,
+): WriteOp {
+  const op_id = opId('revoke_role', role_key, member_id);
+  return {
+    op_id,
+    idempotency_key: idemKey(TEST_WORLD, op_id, report_hash),
+    kind: 'revoke_role',
+    intent: { role_key, role_id: role_id as never, member_id: member_id as never },
+  };
+}
+
+/** cycle-010 FR-10: a rename op (role_key, role_id, new_display_name). */
+export function renameOp(
+  role_key: string,
+  role_id: string,
+  new_display_name: string,
+  report_hash: Hex64 = HASH_A,
+): WriteOp {
+  const op_id = opId('rename_role', role_key);
+  return {
+    op_id,
+    idempotency_key: idemKey(TEST_WORLD, op_id, report_hash),
+    kind: 'rename_role',
+    intent: { role_key, role_id: role_id as never, new_display_name },
+  };
+}
+
 const ROSTER_VERSION: RosterVersion = {
   fingerprint: 'f'.repeat(64) as Hex64,
   fetched_at: '2026-06-05T00:00:00.000Z',

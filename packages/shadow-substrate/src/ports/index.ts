@@ -12,9 +12,15 @@
  */
 import { Context, Effect } from 'effect';
 import type { WorldSlug, RoleId, WriteCapability } from '../types.js';
-import type { CreateRoleIntent, AssignRoleIntent } from '../types.js';
+import type {
+  CreateRoleIntent,
+  AssignRoleIntent,
+  RevokeRoleIntent,
+  RenameRoleIntent,
+} from '../types.js';
 import type { CurrentRoster } from '../schemas/render-model.js';
 import type { RoleRule } from '../schemas/config-surfaces.js';
+import type { RosterIdentitySnapshot } from '../effectful/roster-freshness.js';
 import type {
   RosterError,
   WriteError,
@@ -32,6 +38,20 @@ export class RosterSource extends Context.Tag('shadow/RosterSource')<
     readonly currentRoster: (
       world: WorldSlug,
     ) => Effect.Effect<CurrentRoster, RosterError>;
+    /**
+     * FR-12 / bd-glb (cycle-010): the coarse id-set snapshot —
+     * `{member_ids, role_ids}` — of the live guild. ADDITIVE second read
+     * method alongside `currentRoster` (which carries per-role member COUNTS,
+     * not the id sets — see roster-freshness.ts grounding note). The B1 roster
+     * fingerprint (`rosterFingerprint`) + drift count operate over THIS
+     * snapshot; the LIVE Discord read already has both, so the LIVE Layer
+     * produces the id-sets here without bloating the render-model. Closes the
+     * gap where the port exposed counts but not the WHO-is-present identity the
+     * freshness re-eval needs.
+     */
+    readonly currentRosterIdentity: (
+      world: WorldSlug,
+    ) => Effect.Effect<RosterIdentitySnapshot, RosterError>;
   }
 >() {}
 
@@ -74,6 +94,27 @@ export class RoleWriter extends Context.Tag('shadow/RoleWriter')<
     readonly assignRole: (
       cap: WriteCapability,
       intent: AssignRoleIntent,
+    ) => Effect.Effect<void, WriteError | ShadowGateRejected>;
+    /**
+     * FR-9 (cycle-010): remove ONE member from a role (`member.roles.remove`).
+     * SIGNATURE ONLY — the discord.js adapter is the consumer's
+     * (`role-writer.live.ts`), NOT here. Naturally idempotent (removing an
+     * already-absent role is a no-op at Discord), so — like `assignRole` — it
+     * needs no world lock in the gate dispatch.
+     */
+    readonly revokeRole: (
+      cap: WriteCapability,
+      intent: RevokeRoleIntent,
+    ) => Effect.Effect<void, WriteError | ShadowGateRejected>;
+    /**
+     * FR-10 (cycle-010): rename a role to `new_display_name` (archive-by-rename;
+     * `role_id` preserved). SIGNATURE ONLY — the consumer's adapter
+     * (`role-writer.live.ts`) reuses the same rate-limit-backoff safety envelope
+     * as create. Operates on the frozen `role_id`; `role_key` is unchanged.
+     */
+    readonly renameRole: (
+      cap: WriteCapability,
+      intent: RenameRoleIntent,
     ) => Effect.Effect<void, WriteError | ShadowGateRejected>;
   }
 >() {}

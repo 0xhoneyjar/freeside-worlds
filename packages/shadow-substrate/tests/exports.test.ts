@@ -52,6 +52,17 @@ describe('exported-symbol table (§4.6) — required symbols present', () => {
     expect(substrate.OnboardingLifecycle).toBeDefined();
   });
 
+  test('the cycle-010 ADDITIVE op intents + owner schema/helper are exported (FR-9/10/3)', () => {
+    expect(substrate.RevokeRoleIntent).toBeDefined();
+    expect(substrate.RenameRoleIntent).toBeDefined();
+    expect(substrate.RoleOwner).toBeDefined();
+    expect(typeof substrate.roleOwnerOf).toBe('function');
+    // pre-existing intents stay exported (additivity — nothing removed).
+    expect(substrate.CreateRoleIntent).toBeDefined();
+    expect(substrate.AssignRoleIntent).toBeDefined();
+    expect(substrate.WriteOpKind).toBeDefined();
+  });
+
   test('the S1 EFFECTFUL programs + ports are now exported (§4.6)', () => {
     // EFFECTFUL programs (require Layers) — the S1 half of the §4.6 table.
     expect(typeof substrate.makeGateCheckedRoleWriter).toBe('function');

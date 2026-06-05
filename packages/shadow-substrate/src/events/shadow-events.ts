@@ -69,7 +69,14 @@ export type ShadowEventType = S.Schema.Type<typeof ShadowEventType>;
 export const shadowRoleBaseFields = {
   world: WorldSlug,
   op_id: S.String,
-  kind: S.Literal('create_role', 'assign_role'),
+  // cycle-010 FR-9/FR-10: ADDITIVELY widen the op-kind literal to carry the
+  // revoke/rename ops through the same audited write path. This is a literal-
+  // UNION WIDENING — `create_role`/`assign_role` are unchanged, so existing
+  // payloads still decode. The payload KEY SET is unchanged (`kind` is still one
+  // key), so the B7 conformance shape-skew guard (which compares key SETS, not
+  // literal members) stays green; the 402.7 events-registry reconciliation must
+  // register the same widened literal set.
+  kind: S.Literal('create_role', 'assign_role', 'revoke_role', 'rename_role'),
   role_key: S.String,
   member_id: S.optional(S.String),
 } as const;

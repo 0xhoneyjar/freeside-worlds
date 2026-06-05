@@ -58,6 +58,28 @@ describe('RoleMapConfig', () => {
       S.decodeUnknownSync(RoleMapConfig)(withExtra, { onExcessProperty: 'error' }),
     ).toThrow();
   });
+
+  test('cycle-010 FR-3: a rule WITHOUT owner still decodes (additivity)', () => {
+    // `owner` is plain-optional — an existing role-map authored before cycle-010
+    // (no owner key on any rule) must still validate.
+    expect(() => S.decodeUnknownSync(RoleMapConfig)(valid)).not.toThrow();
+  });
+
+  test('cycle-010 FR-3: a rule WITH owner manual|freeside decodes', () => {
+    const withOwner = {
+      ...valid,
+      rules: [
+        { ...valid.rules[0], owner: 'freeside' },
+        { ...valid.rules[0], role_key: 'purupuru:whale', owner: 'manual' },
+      ],
+    };
+    expect(() => S.decodeUnknownSync(RoleMapConfig)(withOwner)).not.toThrow();
+  });
+
+  test('cycle-010 FR-3: an unknown owner value is REJECTED', () => {
+    const badOwner = { ...valid, rules: [{ ...valid.rules[0], owner: 'overlord' }] };
+    expect(() => S.decodeUnknownSync(RoleMapConfig)(badOwner)).toThrow();
+  });
 });
 
 describe('ApplyModeConfig', () => {

@@ -98,20 +98,115 @@ export type CreateRoleIntent = S.Schema.Type<typeof CreateRoleIntent>;
 export const AssignRoleIntent = S.Struct({
   role_key: S.String,
   member_id: MemberId,
+  /**
+   * FR-11 (cycle-010): the observed Discord `role_id`, OPTIONAL so existing
+   * callers are unbroken. When present, the consumer's assign adapter
+   * (`role-writer.live.ts`) re-verifies the `role_key → role_id` binding before
+   * the assign (cross-batch re-verify): a role_key whose live role_id no longer
+   * matches the frozen one is a stale binding, not a silent re-assign. ADDITIVE:
+   * absent ⇒ today's behavior (resolve by role_key), present ⇒ bound assign.
+   */
+  role_id: S.optional(RoleId),
 });
 export type AssignRoleIntent = S.Schema.Type<typeof AssignRoleIntent>;
 
-export const WriteOpKind = S.Literal('create_role', 'assign_role');
+/**
+ * FR-9 (cycle-010): revoke a role from ONE member. `role_id` is the observed
+ * Discord id (frozen in the RosterCommit, §2.1); the consumer's adapter
+ * (`role-writer.live.ts` `revokeRole`) calls `member.roles.remove(role_id)`.
+ * `role_key` is the stable merge identity carried for audit/ledger keying.
+ */
+export const RevokeRoleIntent = S.Struct({
+  role_key: S.String,
+  role_id: RoleId,
+  member_id: MemberId,
+});
+export type RevokeRoleIntent = S.Schema.Type<typeof RevokeRoleIntent>;
+
+/**
+ * FR-10 (cycle-010): archive-by-rename — rename a role to a new display name
+ * (e.g. `_archived_<ts>_<role_key>`) WITHOUT deleting it, so the `role_id` is
+ * preserved (avoids the recreated-id honesty problem, §5.4). `role_id` is the
+ * frozen observed id; `new_display_name` is the target Discord name. The
+ * consumer's adapter (`role-writer.live.ts` `renameRole`) reuses the same GC
+ * rate-limit-backoff safety envelope as create. `role_key` never changes — only
+ * the mutable `display_name` (§2.2).
+ */
+export const RenameRoleIntent = S.Struct({
+  role_key: S.String,
+  role_id: RoleId,
+  new_display_name: S.String,
+});
+export type RenameRoleIntent = S.Schema.Type<typeof RenameRoleIntent>;
+
+export const WriteOpKind = S.Literal(
+  'create_role',
+  'assign_role',
+  // FR-9/FR-10 (cycle-010): ADDITIVE op kinds. Adding a literal does not change
+  // the meaning of existing literals; `WriteOpKind` is the standalone discriminant
+  // schema (also referenced by the shadow.* event payloads). The structural
+  // kind↔intent pairing is enforced by the `WriteOp` DISCRIMINATED UNION below.
+  'revoke_role',
+  'rename_role',
+);
 export type WriteOpKind = S.Schema.Type<typeof WriteOpKind>;
 
-export const WriteOp = S.Struct({
+/**
+ * The per-op envelope fields shared by every `WriteOp` member (op identity +
+ * idempotency). Spread into each discriminated-union member so the two fields
+ * cannot drift across members.
+ */
+const writeOpBaseFields = {
   /** STABLE per logical op (deterministic from {kind, role_key, member_id}). */
   op_id: S.String,
   /** = sha256(JCS({world, op_id, report_hash})) — safe to retry. */
   idempotency_key: Hex64,
-  kind: WriteOpKind,
-  intent: S.Union(CreateRoleIntent, AssignRoleIntent),
+} as const;
+
+/**
+ * `WriteOp` is a DISCRIMINATED UNION on `kind` (cycle-010 /fagan fix): each
+ * member pins `kind: S.Literal('<kind>')` to EXACTLY its matching intent, so the
+ * kind↔intent pairing is enforced at the schema boundary. The pre-cycle-010
+ * `{ kind: WriteOpKind, intent: S.Union(...) }` shape validated `kind` and
+ * `intent` INDEPENDENTLY — a malformed op (`kind:'rename_role'` carrying an
+ * `AssignRoleIntent`) decoded successfully and `runOp` then dispatched it as a
+ * rename with missing fields. The discriminated union rejects that mismatch at
+ * decode, BEFORE the gate ever sees it.
+ *
+ * BACKWARD-COMPATIBLE: a valid create/assign op (the existing two members,
+ * intent shapes unchanged — assign only GAINED an optional `role_id`) still
+ * decodes. The decoded TS type is the discriminated union, so a consumer can
+ * narrow `intent` by `kind` (no cast needed).
+ */
+const CreateRoleOp = S.Struct({
+  ...writeOpBaseFields,
+  kind: S.Literal('create_role'),
+  intent: CreateRoleIntent,
 });
+const AssignRoleOp = S.Struct({
+  ...writeOpBaseFields,
+  kind: S.Literal('assign_role'),
+  intent: AssignRoleIntent,
+});
+// FR-9: revoke pairs ONLY with RevokeRoleIntent.
+const RevokeRoleOp = S.Struct({
+  ...writeOpBaseFields,
+  kind: S.Literal('revoke_role'),
+  intent: RevokeRoleIntent,
+});
+// FR-10: rename pairs ONLY with RenameRoleIntent.
+const RenameRoleOp = S.Struct({
+  ...writeOpBaseFields,
+  kind: S.Literal('rename_role'),
+  intent: RenameRoleIntent,
+});
+
+export const WriteOp = S.Union(
+  CreateRoleOp,
+  AssignRoleOp,
+  RevokeRoleOp,
+  RenameRoleOp,
+);
 export type WriteOp = S.Schema.Type<typeof WriteOp>;
 
 /**
