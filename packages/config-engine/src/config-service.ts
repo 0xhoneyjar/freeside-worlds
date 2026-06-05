@@ -24,16 +24,27 @@
 import {
   validateSurfacePayload,
   PER_CM_SURFACES,
+  computeRosterCommitId,
   type Surface,
   type SurfaceConfigMap,
   type SurfaceConfig,
+  type RosterCommitContent,
 } from '@freeside-worlds/config-protocol';
-import type { ConfigStore, CurrentConfigRow } from './store.js';
+import type { ConfigStore, CurrentConfigRow, WriteProvenance } from './store.js';
 import {
   ConfigKeyError,
   ConfigValidationError,
   ConfigVersionConflictError,
+  ConfigTenantIsolationError,
 } from './errors.js';
+import {
+  isRetentionSurface,
+  computeCommitHistoryPrune,
+  computeLedgerEntryPrune,
+  DEFAULT_RETENTION_POLICY,
+  type RetentionPolicy,
+  type LedgerEntryRef,
+} from './retention.js';
 
 /**
  * Is `surface` per-CM (composite-keyed `(world, surface, cm_identity_id)`)? A
@@ -72,6 +83,59 @@ function isMissingCmKey(cmIdentityId: string | null | undefined): boolean {
   return cmIdentityId == null || cmIdentityId.trim().length === 0;
 }
 
+/**
+ * cycle-010 (sprint T1.7 · SDD §6) tenant-isolation: the `roster-commit` +
+ * `pending-apply` payloads carry a `world` field (their merge base / apply txn
+ * is world-bound). Extract it (string) so the engine can assert it equals the
+ * path/authorized world. Returns null when the payload has no `world` field (the
+ * 4 existing surfaces + resolution-ledger), so the isolation check is a no-op for
+ * them (additive — never fires for the existing surfaces).
+ */
+function extractPayloadWorld(config: unknown): string | null {
+  if (config !== null && typeof config === 'object' && 'world' in config) {
+    const w = (config as { world?: unknown }).world;
+    return typeof w === 'string' ? w : null;
+  }
+  return null;
+}
+
+/**
+ * cycle-010 (sprint T1.6): flatten a resolution-ledger document into the
+ * `{ key, ts }` refs the retention policy reasons over. PURE.
+ */
+function ledgerEntryRefs(
+  config: SurfaceConfigMap['resolution-ledger'],
+): LedgerEntryRef[] {
+  const entries = config.entries ?? {};
+  return Object.keys(entries).map((key) => ({ key, ts: entries[key]!.ts }));
+}
+
+/**
+ * cycle-010 (FR-1 · SDD §2.1 · /fagan R1 CRITICAL) — assert a roster-commit's
+ * claimed `commit_id` actually hashes its content. The schema only proves the id
+ * is 64-hex; this proves it is the CONTENT HASH (content-addressability is the
+ * FR-1 merge-base guarantee). Recompute from the content (the helper strips the
+ * claimed id before hashing) and throw a ConfigValidationError on mismatch.
+ * Runs BEFORE any store mutation, so a forged commit never persists.
+ */
+function assertRosterCommitIdIntegrity(
+  worldSlug: string,
+  commit: SurfaceConfigMap['roster-commit'],
+): void {
+  // `commit` is already schema-validated (commit_id is 64-hex). Strip it so the
+  // hash is over the content only (never over its own output), then recompute.
+  const { commit_id: claimed, ...content } = commit;
+  const expected = computeRosterCommitId(content as RosterCommitContent);
+  if (claimed !== expected) {
+    throw new ConfigValidationError(worldSlug, 'roster-commit', [
+      {
+        instancePath: '/config/commit_id',
+        message: `commit_id does not match the content hash (claimed ${claimed.slice(0, 12)}…, expected ${expected.slice(0, 12)}…) — content-addressability (FR-1) violated`,
+      },
+    ]);
+  }
+}
+
 export interface ConfigServiceDeps {
   store: ConfigStore;
   /** Optional structured logger ({ info, warn, error }); defaults to no-op. */
@@ -80,6 +144,17 @@ export interface ConfigServiceDeps {
     warn: (obj: unknown, msg?: string) => void;
     error: (obj: unknown, msg?: string) => void;
   };
+  /**
+   * cycle-010 (sprint T1.6 · SDD §4 · §9 fork 5) retention knobs for
+   * `roster-commit` + `resolution-ledger`. Defaults to last-50 + 180d. Tunable
+   * per-deployment without redeploy via this dep.
+   */
+  retentionPolicy?: RetentionPolicy;
+  /**
+   * cycle-010 (sprint T1.6): a clock seam so the warn-then-prune boundary is
+   * testable. Defaults to `() => new Date()`.
+   */
+  now?: () => Date;
 }
 
 const NOOP_LOGGER = {
@@ -104,10 +179,14 @@ export interface WriteOk<S extends Surface> {
 export class ConfigService {
   private readonly store: ConfigStore;
   private readonly logger: NonNullable<ConfigServiceDeps['logger']>;
+  private readonly retentionPolicy: RetentionPolicy;
+  private readonly now: () => Date;
 
   constructor(deps: ConfigServiceDeps) {
     this.store = deps.store;
     this.logger = deps.logger ?? NOOP_LOGGER;
+    this.retentionPolicy = deps.retentionPolicy ?? DEFAULT_RETENTION_POLICY;
+    this.now = deps.now ?? (() => new Date());
   }
 
   /**
@@ -164,6 +243,7 @@ export class ConfigService {
     actor: string,
     reason?: string,
     cmIdentityId: string | null | undefined = null,
+    provenance?: WriteProvenance,
   ): Promise<WriteOk<S>> {
     // 0. FAIL CLOSED at the engine boundary: the per-CM surface REQUIRES a
     // non-null/non-empty cmIdentityId (else the store collapses to the shared
@@ -179,6 +259,18 @@ export class ConfigService {
     // surfaces never reach here nullish — the guard above fails them closed).
     const cmKey = cmIdentityId ?? null;
 
+    // 0b. cycle-010 (sprint T1.7 · SDD §6) TENANT ISOLATION: a roster-commit /
+    // pending-apply payload carries its OWN `world` field (the merge base + the
+    // apply transaction are world-bound). If that payload world disagrees with
+    // the path/authorized world, the write is a cross-tenant write — reject
+    // (defense-in-depth behind the FR-10 floor, which already validated the
+    // actor's authority FOR `worldSlug`). The 4 existing surfaces have no `world`
+    // field, so this never fires for them (additive).
+    const payloadWorld = extractPayloadWorld(config);
+    if (payloadWorld !== null && payloadWorld !== worldSlug) {
+      throw new ConfigTenantIsolationError(worldSlug, surface, payloadWorld);
+    }
+
     // 1. fail-closed validation BEFORE any store mutation.
     const validation = validateSurfacePayload<S>(worldSlug, surface, config);
     if (!validation.ok) {
@@ -191,6 +283,18 @@ export class ConfigService {
         surface,
         validation.errors.map((e) => ({ instancePath: e.instancePath, message: e.message })),
       );
+    }
+
+    // 1b. cycle-010 (FR-1 · SDD §2.1 · /fagan R1 CRITICAL) COMMIT-ID INTEGRITY:
+    // the schema only proves `commit_id` is 64-hex — NOT that it actually hashes
+    // the content. Without this check a caller could persist a FORGED commit
+    // (any 64-hex string), defeating the content-addressed merge-base guarantee
+    // (FR-1: commit_id IS the content hash). Recompute from the content (strip
+    // the claimed id, hash the rest via the canonical events primitive) and
+    // reject a mismatch BEFORE any store mutation. Mirrors the L6 handoff
+    // content-addressability invariant (id-as-claimed must equal id-as-computed).
+    if (surface === 'roster-commit') {
+      assertRosterCommitIdIntegrity(worldSlug, config as SurfaceConfigMap['roster-commit']);
     }
 
     // 2. read current head (prev_config + action) — per-CM for onboarding-lifecycle.
@@ -221,6 +325,7 @@ export class ConfigService {
       newConfig: config,
       actor,
       reason,
+      provenance,
     });
 
     // 5. null => optimistic-lock conflict (0 rows affected on the guard, or a
@@ -240,6 +345,13 @@ export class ConfigService {
       'config written',
     );
 
+    // 6. cycle-010 (sprint T1.6 · SDD §4) warn-then-prune at write time for the
+    // retention surfaces. NEVER fails the write — retention is best-effort, run
+    // AFTER the durable write so a prune error can never lose a just-written
+    // commit. For roster-commit (append-only history) it prunes records; for
+    // resolution-ledger (one document) it warns on over-retention entries.
+    await this.applyRetention(worldSlug, surface, cmKey, config);
+
     return {
       envelope: {
         schema_version: '1.0',
@@ -250,6 +362,83 @@ export class ConfigService {
       version: result.newVersion,
       recordId: result.recordId,
     };
+  }
+
+  /**
+   * cycle-010 (sprint T1.6 · SDD §4 · §9 fork 5) warn-then-prune. Best-effort,
+   * post-write, never throws into the caller (a retention failure must not lose
+   * the write that already committed).
+   *
+   *   • `roster-commit`     — prune append-only history records (last-N + TTL).
+   *     Actual delete runs ONLY when the adapter implements both `listHistoryRefs`
+   *     + `pruneHistory`; otherwise WARN (loud) — Phase-1 warn-then-prune.
+   *   • `resolution-ledger` — the ledger is one document we just wrote; WARN when
+   *     its entries exceed retention (the consumer/apply planner owns the actual
+   *     entry eviction; the store-side policy bounds growth + warns).
+   */
+  private async applyRetention<S extends Surface>(
+    worldSlug: string,
+    surface: S,
+    cmKey: string | null,
+    config: SurfaceConfigMap[S],
+  ): Promise<void> {
+    if (!isRetentionSurface(surface)) return;
+    const now = this.now();
+
+    try {
+      if (surface === 'roster-commit') {
+        // Append-only history retention. Needs the adapter's optional hooks.
+        if (!this.store.listHistoryRefs || !this.store.pruneHistory) {
+          this.logger.warn(
+            { worldSlug, surface, policy: this.retentionPolicy },
+            'roster-commit retention configured but adapter has no prune hooks — history NOT pruned (warn-then-prune Phase-1)',
+          );
+          return;
+        }
+        const refs = await this.store.listHistoryRefs(worldSlug, surface, cmKey);
+        const plan = computeCommitHistoryPrune(refs, now, this.retentionPolicy);
+        if (plan.pruneIds.length === 0) return;
+        this.logger.warn(
+          {
+            worldSlug,
+            surface,
+            total: plan.total,
+            overCount: plan.overCount,
+            overAge: plan.overAge,
+            pruning: plan.pruneIds.length,
+            policy: this.retentionPolicy,
+          },
+          'roster-commit history over retention — pruning',
+        );
+        const pruned = await this.store.pruneHistory(worldSlug, surface, plan.pruneIds, cmKey);
+        this.logger.info({ worldSlug, surface, pruned }, 'roster-commit history pruned');
+        return;
+      }
+
+      if (surface === 'resolution-ledger') {
+        const entries = ledgerEntryRefs(config as SurfaceConfigMap['resolution-ledger']);
+        const plan = computeLedgerEntryPrune(entries, now, this.retentionPolicy);
+        if (plan.pruneKeys.length === 0) return;
+        // The ledger is a single versioned document; the entry-eviction is the
+        // CONSUMER's write (next PUT). The store-side policy WARNS so unbounded
+        // growth is visible — Phase-1 warn-then-prune.
+        this.logger.warn(
+          {
+            worldSlug,
+            surface,
+            total: plan.total,
+            overCount: plan.overCount,
+            overAge: plan.overAge,
+            overRetention: plan.pruneKeys.length,
+            policy: this.retentionPolicy,
+          },
+          'resolution-ledger over retention — consumer should evict over-retention entries (warn-then-prune Phase-1)',
+        );
+      }
+    } catch (err) {
+      // Retention is best-effort — NEVER propagate (the write already committed).
+      this.logger.error({ worldSlug, surface, err: String(err) }, 'retention pass failed (non-fatal)');
+    }
   }
 
   private rowToReadResult<S extends Surface>(

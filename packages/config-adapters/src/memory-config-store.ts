@@ -12,6 +12,8 @@ import type {
   CurrentConfigRow,
   WriteInput,
   WriteResult,
+  WriteProvenance,
+  HistoryRecordRef,
 } from '@freeside-worlds/config-engine';
 
 interface HeadRow {
@@ -36,6 +38,8 @@ interface HistoryRow {
   newConfig: unknown;
   actor: string;
   reason?: string;
+  /** cycle-010 (sprint T1.7): write provenance (audit subject). */
+  provenance?: WriteProvenance;
   createdAt: string;
 }
 
@@ -91,6 +95,7 @@ export class MemoryConfigStore implements ConfigStore {
       newConfig: input.newConfig,
       actor: input.actor,
       reason: input.reason,
+      provenance: input.provenance,
       createdAt: now,
     });
 
@@ -119,6 +124,48 @@ export class MemoryConfigStore implements ConfigStore {
       updatedAt: now,
     });
     return { recordId, newVersion };
+  }
+
+  /**
+   * cycle-010 (sprint T1.6 · SDD §4) retention hook: list the history record refs
+   * ({id, createdAt}) for a key. Used by the engine's warn-then-prune pass.
+   */
+  async listHistoryRefs(
+    worldSlug: string,
+    surface: string,
+    cmIdentityId: string | null = null,
+  ): Promise<HistoryRecordRef[]> {
+    return this.history
+      .filter(
+        (h) =>
+          h.worldSlug === worldSlug &&
+          h.surface === surface &&
+          (h.cmIdentityId ?? null) === cmIdentityId,
+      )
+      .map((h) => ({ id: h.id, createdAt: h.createdAt }));
+  }
+
+  /**
+   * cycle-010 (sprint T1.6) retention hook: delete the named history records.
+   * Returns the count removed. Scoped to the key so a prune can never touch
+   * another world/surface/CM's history.
+   */
+  async pruneHistory(
+    worldSlug: string,
+    surface: string,
+    recordIds: ReadonlyArray<number>,
+    cmIdentityId: string | null = null,
+  ): Promise<number> {
+    const ids = new Set(recordIds);
+    const before = this.history.length;
+    this.history = this.history.filter((h) => {
+      const inScope =
+        h.worldSlug === worldSlug &&
+        h.surface === surface &&
+        (h.cmIdentityId ?? null) === cmIdentityId;
+      return !(inScope && ids.has(h.id));
+    });
+    return before - this.history.length;
   }
 
   /**

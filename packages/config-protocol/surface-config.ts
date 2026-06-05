@@ -85,6 +85,28 @@ import type {
   OnboardingLifecycle as OnboardingLifecycleType,
 } from '@freeside-worlds/shadow-substrate';
 
+/**
+ * ── cycle-010 (Roles-as-Code) surface registration (SDD §4) ─────────────────
+ * Three NET-NEW state-plane surfaces authored in `./roles-as-code-surfaces.ts`
+ * (config-service ledgers, not substrate concerns — see that module's header):
+ *   • `roster-commit`     — append-only merge-base commit log (FR-1, §2.1)
+ *   • `resolution-ledger` — durable conflict-resolution map (FR-6, §2.5)
+ *   • `pending-apply`     — durable apply-transaction record (§5.3)
+ * Registered the SAME additive way the S2 surfaces were (extend `SurfaceSchema`/
+ * `SurfaceConfigMap`/`KNOWN_SURFACES` + the discriminated envelope union; no
+ * migration — the 4 existing surfaces keep their exact shapes).
+ */
+import {
+  RosterCommit,
+  ResolutionLedger,
+  PendingApply,
+} from './roles-as-code-surfaces.js';
+import type {
+  RosterCommit as RosterCommitType,
+  ResolutionLedger as ResolutionLedgerType,
+  PendingApply as PendingApplyType,
+} from './roles-as-code-surfaces.js';
+
 // ─── BLOCKER-1 primitives: bounded, control-byte-free strings ─────────────
 
 /**
@@ -292,6 +314,10 @@ export const SurfaceSchema = S.Literal(
   'role-map',
   'apply-mode',
   'onboarding-lifecycle',
+  // cycle-010 (Roles-as-Code) NET-NEW surfaces (SDD §4) — additive.
+  'roster-commit',
+  'resolution-ledger',
+  'pending-apply',
 );
 export type Surface = S.Schema.Type<typeof SurfaceSchema>;
 
@@ -301,6 +327,10 @@ export interface SurfaceConfigMap {
   'role-map': RoleMapConfigType;
   'apply-mode': ApplyModeConfigType;
   'onboarding-lifecycle': OnboardingLifecycleType;
+  // cycle-010 (Roles-as-Code) NET-NEW surfaces (SDD §2.1/§2.5/§5.3).
+  'roster-commit': RosterCommitType;
+  'resolution-ledger': ResolutionLedgerType;
+  'pending-apply': PendingApplyType;
 }
 
 /**
@@ -352,11 +382,38 @@ const OnboardingLifecycleEnvelope = S.Struct({
   config: OnboardingLifecycle,
 });
 
+// ─── cycle-010 (Roles-as-Code) NET-NEW envelopes (SDD §4) ───────────────────
+const RosterCommitEnvelope = S.Struct({
+  schema_version: S.Literal('1.0'),
+  world_slug: WorldSlugField,
+  surface: S.Literal('roster-commit'),
+  config: RosterCommit,
+});
+
+const ResolutionLedgerEnvelope = S.Struct({
+  schema_version: S.Literal('1.0'),
+  world_slug: WorldSlugField,
+  surface: S.Literal('resolution-ledger'),
+  config: ResolutionLedger,
+});
+
+const PendingApplyEnvelope = S.Struct({
+  schema_version: S.Literal('1.0'),
+  world_slug: WorldSlugField,
+  surface: S.Literal('pending-apply'),
+  config: PendingApply,
+});
+
 export const SurfaceConfigSchema = S.Union(
   VerifyMessageEnvelope,
   RoleMapEnvelope,
   ApplyModeEnvelope,
   OnboardingLifecycleEnvelope,
+  // cycle-010 (Roles-as-Code) — additive union members; the union member whose
+  // `surface` literal matches is selected for a surface-correct decode error.
+  RosterCommitEnvelope,
+  ResolutionLedgerEnvelope,
+  PendingApplyEnvelope,
 );
 
 /** Generic TS envelope preserving the surface->payload mapping for callers. */
@@ -373,6 +430,10 @@ export const KNOWN_SURFACES: readonly Surface[] = [
   'role-map',
   'apply-mode',
   'onboarding-lifecycle',
+  // cycle-010 (Roles-as-Code) NET-NEW surfaces (SDD §4).
+  'roster-commit',
+  'resolution-ledger',
+  'pending-apply',
 ] as const;
 
 /**
@@ -408,3 +469,30 @@ export type {
   ApplyModeConfigType,
   OnboardingLifecycleType,
 };
+
+/**
+ * Re-export the cycle-010 (Roles-as-Code) NET-NEW surface payload schemas +
+ * the `commit_id` content-hash helper so config-protocol callers (config-engine,
+ * config-service, the bot client, tests) have ONE import site for the surface
+ * contract (matches the S2 re-export pattern above).
+ */
+export {
+  RosterCommit,
+  ResolutionLedger,
+  PendingApply,
+  CommitRoleOwner,
+  CommitRoleDefinition,
+  CommitMembership,
+  ResolutionEntry,
+  PendingApplyOpStatus,
+  PreApplySnapshot,
+  computeRosterCommitId,
+} from './roles-as-code-surfaces.js';
+export type {
+  RosterCommitType,
+  ResolutionLedgerType,
+  PendingApplyType,
+};
+export type {
+  RosterCommitContent,
+} from './roles-as-code-surfaces.js';

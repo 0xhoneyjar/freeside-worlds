@@ -20,6 +20,7 @@ import type {
   CurrentConfigRow,
   WriteInput,
   WriteResult,
+  HistoryRecordRef,
 } from '@freeside-worlds/config-engine';
 
 /** Minimal structural shape of a `pg.Pool` / `pg.PoolClient`. */
@@ -101,11 +102,15 @@ export class PgConfigStore implements ConfigStore {
     try {
       await client.query('BEGIN');
 
-      // 1. append the immutable history row first (it carries prev+new).
+      // 1. append the immutable history row first (it carries prev+new). The
+      // cycle-010 (sprint T1.7) `provenance` JSONB column (migration 0003,
+      // additive DEFAULT NULL) records the audit subject {service_identity,
+      // actor, plan_id|apply_id, fencing_token, ts}. NULL for the 4 existing
+      // surfaces' writes (no provenance supplied).
       const recordRes = await client.query<{ id: string | number }>(
         `INSERT INTO config_record
-            (world_slug, surface, cm_identity_id, action, prev_config, new_config, actor, reason)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            (world_slug, surface, cm_identity_id, action, prev_config, new_config, actor, reason, provenance)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          RETURNING id`,
         [
           input.worldSlug,
@@ -116,6 +121,7 @@ export class PgConfigStore implements ConfigStore {
           JSON.stringify(input.newConfig),
           input.actor,
           input.reason ?? null,
+          input.provenance === undefined ? null : JSON.stringify(input.provenance),
         ],
       );
       const recordId = Number(recordRes.rows[0]!.id);
@@ -179,6 +185,50 @@ export class PgConfigStore implements ConfigStore {
     } finally {
       client.release();
     }
+  }
+
+  /**
+   * cycle-010 (sprint T1.6 · SDD §4) retention hook: list the history record
+   * refs ({id, createdAt}) for a key, most-recent-first. Scoped to the composite
+   * key (per-CM for onboarding-lifecycle; `cm=''` for the rest).
+   */
+  async listHistoryRefs(
+    worldSlug: string,
+    surface: string,
+    cmIdentityId: string | null = null,
+  ): Promise<HistoryRecordRef[]> {
+    const res = await this.pool.query<{ id: string | number; created_at: Date | string }>(
+      `SELECT id, created_at
+         FROM config_record
+        WHERE world_slug = $1 AND surface = $2 AND cm_identity_id = $3
+        ORDER BY created_at DESC, id DESC`,
+      [worldSlug, surface, this.cmKey(cmIdentityId)],
+    );
+    return res.rows.map((r) => ({
+      id: Number(r.id),
+      createdAt: typeof r.created_at === 'string' ? r.created_at : r.created_at.toISOString(),
+    }));
+  }
+
+  /**
+   * cycle-010 (sprint T1.6) retention hook: delete the named history records.
+   * Scoped to the composite key so a prune can never touch another
+   * world/surface/CM's history. Returns the count removed.
+   */
+  async pruneHistory(
+    worldSlug: string,
+    surface: string,
+    recordIds: ReadonlyArray<number>,
+    cmIdentityId: string | null = null,
+  ): Promise<number> {
+    if (recordIds.length === 0) return 0;
+    const res = await this.pool.query(
+      `DELETE FROM config_record
+        WHERE world_slug = $1 AND surface = $2 AND cm_identity_id = $3
+          AND id = ANY($4::bigint[])`,
+      [worldSlug, surface, this.cmKey(cmIdentityId), recordIds],
+    );
+    return res.rowCount ?? 0;
   }
 
   private mapRow(row: CurrentConfigDbRow): CurrentConfigRow {

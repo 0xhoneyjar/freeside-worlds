@@ -16,6 +16,29 @@
  */
 
 import type { ConfigAction } from './types.js';
+import type { HistoryRecordRef } from './retention.js';
+
+/**
+ * cycle-010 (Roles-as-Code · sprint T1.7 · SDD §6) write provenance. Stamped on
+ * every world-keyed roles-as-code write so the audit subject records BOTH the
+ * service identity (the bot credential) AND the human actor, plus the
+ * plan/apply binding + the lease fencing token. A write lacking the right
+ * provenance (e.g. service-credential-only) is rejected upstream (the FR-10
+ * floor); this carries the resolved provenance into the history row for audit.
+ */
+export interface WriteProvenance {
+  /** the bot/service credential identity (NOT the human). */
+  service_identity: string;
+  /** the delegated human CM (claims.sub ∈ admin_principals). */
+  actor: string;
+  /** the apply/plan this write belongs to (plan_id OR apply_id). */
+  plan_id?: string;
+  apply_id?: string;
+  /** the world-lease fencing token carried into the CAS write. */
+  fencing_token?: string;
+  /** iso-8601 stamp. */
+  ts: string;
+}
 
 /** A head-pointer row. `config` is the opaque (already-validated) JSONB. */
 export interface CurrentConfigRow {
@@ -57,6 +80,13 @@ export interface WriteInput {
   newConfig: unknown;
   actor: string;
   reason?: string;
+  /**
+   * cycle-010 (sprint T1.7 · SDD §6): write provenance, stamped on roles-as-code
+   * world-keyed writes. Optional so the 4 existing surfaces' write path is
+   * unchanged (additive). Adapters that predate this MAY ignore it; the
+   * append-only history row SHOULD persist it when present (audit subject).
+   */
+  provenance?: WriteProvenance;
 }
 
 /** Result of a successful write. */
@@ -92,4 +122,26 @@ export interface ConfigStore {
    * UPDATE-conflict.
    */
   applyWrite(input: WriteInput): Promise<WriteResult | null>;
+
+  /**
+   * cycle-010 (sprint T1.6 · SDD §4) OPTIONAL retention hooks — present only on
+   * adapters that have implemented prune. The engine warns-then-prunes ONLY when
+   * BOTH are present; otherwise it WARNS and leaves history intact (Phase-1
+   * warn-then-prune: never silent unbounded growth, prune is a fast-follow when
+   * the adapter gains the capability). Kept OPTIONAL so the existing adapters
+   * (Memory/Pg) compile unbroken — adding prune is an additive adapter change.
+   */
+  listHistoryRefs?(
+    worldSlug: string,
+    surface: string,
+    cmIdentityId?: string | null,
+  ): Promise<HistoryRecordRef[]>;
+
+  /** Delete the named config_record history rows (retention prune). */
+  pruneHistory?(
+    worldSlug: string,
+    surface: string,
+    recordIds: ReadonlyArray<number>,
+    cmIdentityId?: string | null,
+  ): Promise<number>;
 }

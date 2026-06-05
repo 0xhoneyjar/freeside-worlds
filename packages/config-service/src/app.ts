@@ -32,7 +32,9 @@ import {
   ConfigKeyError,
   ConfigValidationError,
   ConfigVersionConflictError,
+  ConfigTenantIsolationError,
 } from '@freeside-worlds/config-engine';
+import type { WriteProvenance } from '@freeside-worlds/config-engine';
 import type { Surface, SurfaceConfigMap } from '@freeside-worlds/config-protocol';
 import { KNOWN_SURFACES, PER_CM_SURFACES } from '@freeside-worlds/config-protocol';
 import {
@@ -80,6 +82,21 @@ const READ_AUTHORITY_SURFACES: ReadonlySet<Surface> = new Set<Surface>([
 ]);
 
 /**
+ * cycle-010 (sprint T1.7 · SDD §6 · /fagan R2 MAJOR) — the three roles-as-code
+ * world-keyed surfaces. A write to ANY of these MUST carry complete write
+ * provenance (audit subject), else it is rejected 400. The 4 legacy surfaces
+ * (verify-message/role-map/apply-mode/onboarding-lifecycle) keep their pre-S2
+ * behavior (no provenance required). This is the enforcement boundary: provenance
+ * was buildable-but-optional before, so a provenance-less roster-commit could
+ * land with NO audit subject — defeating T1.7.
+ */
+const ROLES_AS_CODE_SURFACES: ReadonlySet<Surface> = new Set<Surface>([
+  'roster-commit',
+  'resolution-ledger',
+  'pending-apply',
+]);
+
+/**
  * Per-CM ISOLATION check (NOT authority) — shared by the read AND write paths
  * (DRY: one place keeps them aligned). For the per-CM surface a CM may only
  * touch their OWN record: the `cm` query param MUST equal the authenticated
@@ -89,6 +106,85 @@ const READ_AUTHORITY_SURFACES: ReadonlySet<Surface> = new Set<Surface>([
 function cmIsolationOk(surface: Surface, cmIdentityId: string | null, actor: string): boolean {
   if (!isPerCmSurface(surface)) return true;
   return cmIdentityId === actor;
+}
+
+/** Result of building provenance: ok-with-value (or undefined for legacy), or a 400-bearing reject. */
+type ProvenanceResult =
+  | { ok: true; provenance: WriteProvenance | undefined }
+  | { ok: false; detail: string };
+
+/**
+ * cycle-010 (sprint T1.7 · SDD §6 · /fagan R2 MAJOR) provenance builder +
+ * ENFORCER. The `actor` is the SERVER's authenticated CM (never the body) and
+ * `ts` is server time, so the audit subject's who/when cannot be forged by the
+ * request body. The service-bound fields (service_identity, plan_id|apply_id,
+ * fencing_token) are caller-supplied (they describe the bot + the apply
+ * transaction); they are length-bounded defensively before stamping.
+ *
+ * ENFORCEMENT (the /fagan R2 fix): for a ROLES-AS-CODE surface, complete
+ * provenance is MANDATORY — a write missing it is REJECTED (`ok:false`, the
+ * caller returns HTTP 400 `invalid_provenance`). A roles-as-code write is
+ * rejected when: the block is missing/not-an-object, OR `service_identity` is
+ * missing, OR BOTH `plan_id` and `apply_id` are missing (every roles-as-code
+ * write belongs to a plan OR an apply), OR `fencing_token` is missing (the
+ * lease-CAS token). For a LEGACY surface, provenance stays OPTIONAL — absent ⇒
+ * `ok:true` with `provenance: undefined` (pre-S2 behavior, unchanged).
+ */
+function buildProvenance(
+  raw:
+    | {
+        service_identity?: unknown;
+        plan_id?: unknown;
+        apply_id?: unknown;
+        fencing_token?: unknown;
+      }
+    | undefined,
+  actor: string,
+  surface: Surface,
+): ProvenanceResult {
+  const required = ROLES_AS_CODE_SURFACES.has(surface);
+
+  if (raw === undefined || raw === null || typeof raw !== 'object') {
+    if (required) {
+      return { ok: false, detail: `surface '${surface}' requires a provenance block { service_identity, plan_id|apply_id, fencing_token }` };
+    }
+    return { ok: true, provenance: undefined }; // legacy: absent is fine.
+  }
+
+  const str = (v: unknown): string | undefined =>
+    typeof v === 'string' && v.length > 0 && v.length <= 256 ? v : undefined;
+  const service_identity = str(raw.service_identity);
+  const plan_id = str(raw.plan_id);
+  const apply_id = str(raw.apply_id);
+  const fencing_token = str(raw.fencing_token);
+
+  if (required) {
+    if (service_identity === undefined) {
+      return { ok: false, detail: 'provenance.service_identity is required (non-empty string)' };
+    }
+    if (plan_id === undefined && apply_id === undefined) {
+      return { ok: false, detail: 'provenance requires at least one of plan_id / apply_id' };
+    }
+    if (fencing_token === undefined) {
+      return { ok: false, detail: 'provenance.fencing_token is required (the world-lease CAS token)' };
+    }
+  } else if (service_identity === undefined) {
+    // legacy surface with a partial/empty provenance block → treat as none
+    // (additive — never invents one, never rejects a legacy write on this).
+    return { ok: true, provenance: undefined };
+  }
+
+  return {
+    ok: true,
+    provenance: {
+      service_identity: service_identity!,
+      actor,
+      ...(plan_id !== undefined ? { plan_id } : {}),
+      ...(apply_id !== undefined ? { apply_id } : {}),
+      ...(fencing_token !== undefined ? { fencing_token } : {}),
+      ts: new Date().toISOString(),
+    },
+  };
 }
 
 export interface AppDeps {
@@ -218,6 +314,18 @@ export function makeHandler(deps: AppDeps): (req: Request) => Promise<Response> 
         config?: unknown;
         expected_version?: unknown;
         reason?: unknown;
+        /**
+         * cycle-010 (sprint T1.7 · SDD §6): caller-supplied write provenance for
+         * roles-as-code world-keyed writes. The bot sends {service_identity,
+         * plan_id|apply_id, fencing_token}; the SERVER stamps `actor` (the
+         * authenticated CM) + `ts` so neither can be forged by the body.
+         */
+        provenance?: {
+          service_identity?: unknown;
+          plan_id?: unknown;
+          apply_id?: unknown;
+          fencing_token?: unknown;
+        };
       };
       if (body.config === undefined || typeof body.expected_version !== 'number') {
         return json(
@@ -245,6 +353,17 @@ export function makeHandler(deps: AppDeps): (req: Request) => Promise<Response> 
         writer = freshWriter;
       }
 
+      // cycle-010 (sprint T1.7 · SDD §6 · /fagan R2): build + ENFORCE write
+      // provenance. The actor is the authenticated CM (never the body) and `ts`
+      // is server time — so a body cannot forge who/when. For a ROLES-AS-CODE
+      // surface complete provenance is MANDATORY (reject 400 invalid_provenance);
+      // legacy surfaces keep optional provenance (absent ⇒ undefined).
+      const provResult = buildProvenance(body.provenance, writer.actor, surface);
+      if (!provResult.ok) {
+        return json({ error: 'invalid_provenance', detail: provResult.detail }, 400);
+      }
+      const provenance = provResult.provenance;
+
       try {
         const ok = await service.putConfig(
           worldSlug,
@@ -254,6 +373,7 @@ export function makeHandler(deps: AppDeps): (req: Request) => Promise<Response> 
           writer.actor,
           typeof body.reason === 'string' ? body.reason : undefined,
           cmIdentityId,
+          provenance,
         );
         return json({ envelope: ok.envelope, version: ok.version, record_id: ok.recordId });
       } catch (err) {
@@ -266,6 +386,10 @@ export function makeHandler(deps: AppDeps): (req: Request) => Promise<Response> 
             },
             409,
           );
+        }
+        if (err instanceof ConfigTenantIsolationError) {
+          // cross-world write (payload world != path/authorized world) — 403.
+          return json({ error: 'forbidden', detail: 'payload world does not match the authorized world' }, 403);
         }
         if (err instanceof ConfigValidationError) {
           return json({ error: 'validation_failed', issues: err.issues }, 422);

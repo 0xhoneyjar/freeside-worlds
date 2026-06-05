@@ -39,8 +39,12 @@
       "name": "@freeside-worlds/config-protocol",
       "version": "0.1.0",
       "dependencies": {
+        "@0xhoneyjar/events": "github:0xHoneyJar/loa-freeside#68f5a89cb02c6b3ddf5ab14a1d65753bc02bd9fe",
         "@effect/schema": "^0.75",
         "@freeside-worlds/shadow-substrate": "workspace:*",
+        "@noble/curves": "^1.7.0",
+        "@noble/hashes": "^1.6.0",
+        "canonicalize": "^2.0.0",
         "effect": "^3.10.0",
       },
     },

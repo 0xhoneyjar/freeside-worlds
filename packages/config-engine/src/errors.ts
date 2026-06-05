@@ -58,6 +58,29 @@ export class ConfigKeyError extends Error {
   }
 }
 
+/**
+ * cycle-010 (sprint T1.7 · SDD §6) tenant-isolation violation. Thrown when a
+ * write's payload `world` does NOT match the path/authorized world — a CM
+ * authorized for world A must not author state under world B (cross-world write).
+ * The FR-10 floor validates the actor's authority FOR the path world; this is the
+ * defense-in-depth check that the PAYLOAD's own `world` field agrees. Maps to
+ * HTTP 403 (forbidden — wrong tenant), distinct from a 400 bad-shape.
+ */
+export class ConfigTenantIsolationError extends Error {
+  readonly worldSlug: string;
+  readonly surface: string;
+  readonly payloadWorld: string;
+  constructor(worldSlug: string, surface: string, payloadWorld: string) {
+    super(
+      `Tenant isolation violation for ${surface}: write to world '${worldSlug}' carries payload world '${payloadWorld}'`,
+    );
+    this.name = 'ConfigTenantIsolationError';
+    this.worldSlug = worldSlug;
+    this.surface = surface;
+    this.payloadWorld = payloadWorld;
+  }
+}
+
 /** Thrown when an incoming config payload fails sealed-schema validation. */
 export class ConfigValidationError extends Error {
   readonly issues: { instancePath: string; message: string }[];
