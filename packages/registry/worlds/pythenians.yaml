@@ -18,6 +18,7 @@ description: "Pythenians — a CHAIN-FIRST, SHADOW-ONLY onboarding world for the
 shadow_onboarding:
   # The canonical Pythenians Discord guild snowflake (17-20 digits). The LIVE
   # RosterSource/RoleWriter resolve roles+members against this guild.
+  # operator-confirmed 2026-06-28 (provided directly; mirrors purupuru.yaml provenance convention).
   guild_id: "826115122799837205"
 
   # The Freeside-managed role-name prefix. Freeside touches ONLY roles whose name
