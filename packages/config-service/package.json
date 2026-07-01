@@ -13,7 +13,8 @@
   "dependencies": {
     "@freeside-worlds/config-adapters": "workspace:*",
     "@freeside-worlds/config-engine": "workspace:*",
-    "@freeside-worlds/config-protocol": "workspace:*"
+    "@freeside-worlds/config-protocol": "workspace:*",
+    "yaml": "^2.6.0"
   },
   "peerDependencies": {
     "pg": "^8.13.0"

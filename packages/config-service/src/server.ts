@@ -10,12 +10,20 @@
  *                         world DB / identity spine). Required.
  *   PORT                  listen port (default 3000 — matches the world module).
  *   CONFIG_SERVICE_TOKEN  read-gate shared token (unset -> reads open in dev).
+ *   WORLDS_API_TOKEN      kitchen manifest API bearer (POST /v1/worlds/manifest).
+ *   SERVICE_TOKEN         alias accepted for manifest routes (falls back to
+ *                         CONFIG_SERVICE_TOKEN when unset).
+ *   WORLDS_REGISTRY_DIR     override path to packages/registry/worlds (default).
+ *   MANIFEST_INDEX_PATH     override kitchen idempotency index JSON path.
  *
  * Run: DATABASE_URL=postgres://... bun packages/config-service/src/server.ts
  */
 import { ConfigService } from '@freeside-worlds/config-engine';
 import { PgConfigStore, type PgPoolLike } from '@freeside-worlds/config-adapters';
 import { makeHandler } from './app.js';
+import { createRegistryBridge } from './manifest/registry.js';
+import { ManifestService } from './manifest/service.js';
+import { createManifestStore } from './manifest/store.js';
 
 async function main() {
   const url = process.env.DATABASE_URL;
@@ -40,7 +48,13 @@ async function main() {
     },
   });
 
-  const handle = makeHandler({ service });
+  const handle = makeHandler({
+    service,
+    manifestService: new ManifestService({
+      store: createManifestStore(),
+      registry: createRegistryBridge(),
+    }),
+  });
   const port = Number(process.env.PORT ?? 3000);
 
   // Bun global — typed via @types/bun in the workspace devDeps.

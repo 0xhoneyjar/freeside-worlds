@@ -7,6 +7,9 @@ build/
 # Generator output — copied to loa-freeside via cross-repo PR
 packages/registry/tf-out/
 
+# Kitchen manifest API runtime index (not committed)
+packages/registry/.kitchen-manifest-index.json
+
 # Local dev
 .env
 .env.local

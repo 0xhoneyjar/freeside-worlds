@@ -39,6 +39,29 @@ export function checkServiceToken(req: Request): boolean {
  *   2. assert the CM is authorized for `worldSlug` (per-world authz)
  *   3. return { actor: claims.sub } (or a CM display id)
  */
+/**
+ * Kitchen manifest gate — Bearer token must match WORLDS_API_TOKEN or SERVICE_TOKEN
+ * (CONFIG_SERVICE_TOKEN alias). When neither env var is set, requests are OPEN
+ * (dev default — mirrors checkServiceToken fail-open posture).
+ */
+export function checkWorldsApiToken(req: Request): boolean {
+  const worldsToken = process.env.WORLDS_API_TOKEN;
+  const serviceToken = process.env.SERVICE_TOKEN ?? process.env.CONFIG_SERVICE_TOKEN;
+
+  if (!worldsToken && !serviceToken) return true;
+
+  const authz = req.headers.get('authorization');
+  if (!authz) return false;
+  const match = /^Bearer\s+(.+)$/i.exec(authz.trim());
+  if (!match) return false;
+  const token = match[1]!.trim();
+  if (token.length === 0) return false;
+
+  if (worldsToken && token === worldsToken) return true;
+  if (serviceToken && token === serviceToken) return true;
+  return false;
+}
+
 export function resolveWriter(req: Request, _worldSlug: string): Writer | null {
   const authz = req.headers.get('authorization');
   if (!authz) return null;

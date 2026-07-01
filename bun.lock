@@ -50,6 +50,7 @@
         "@freeside-worlds/config-adapters": "workspace:*",
         "@freeside-worlds/config-engine": "workspace:*",
         "@freeside-worlds/config-protocol": "workspace:*",
+        "yaml": "^2.6.0",
       },
       "devDependencies": {
         "@types/bun": "latest",

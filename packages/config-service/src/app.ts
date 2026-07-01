@@ -9,6 +9,8 @@
  * Routes:
  *   GET  /v1/config/:world/:surface  -> 200 {envelope, version} | 404 | 401
  *   PUT  /v1/config/:world/:surface  -> 200 {envelope, version} | 409 | 403 | 400/422
+ *   POST /v1/worlds/manifest         -> 201 | 200 (idempotent) | 409 | 401 | 422
+ *   GET  /v1/worlds/lookup           -> 200 | 404 | 401 (kitchen re-probe worker)
  *   GET  /health                     -> 200 (ECS health check)
  *
  * fail-soft read: 404 means "never configured" — the CALLER uses its defaults.
@@ -29,6 +31,8 @@ import {
 import type { Surface, SurfaceConfigMap } from '@freeside-worlds/config-protocol';
 import { KNOWN_SURFACES } from '@freeside-worlds/config-protocol';
 import { checkServiceToken, resolveWriter } from './auth.js';
+import { handleManifestRoutes } from './manifest/routes.js';
+import type { ManifestService } from './manifest/service.js';
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -46,17 +50,23 @@ function isKnownSurface(s: string): s is Surface {
 
 export interface AppDeps {
   service: ConfigService;
+  manifestService?: ManifestService;
 }
 
 /** Build the fetch handler. Pure over deps so tests inject a memory-backed service. */
 export function makeHandler(deps: AppDeps): (req: Request) => Promise<Response> {
-  const { service } = deps;
+  const { service, manifestService } = deps;
 
   return async function handle(req: Request): Promise<Response> {
     const url = new URL(req.url);
 
     if (req.method === 'GET' && url.pathname === '/health') {
       return json({ ok: true });
+    }
+
+    if (manifestService) {
+      const manifestResponse = await handleManifestRoutes(req, url, manifestService);
+      if (manifestResponse) return manifestResponse;
     }
 
     const match = ROUTE.exec(url.pathname);

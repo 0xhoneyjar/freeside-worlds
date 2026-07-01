@@ -23,7 +23,7 @@
     "sync-from-tf": "bun packages/registry/bin/sync-from-tf.ts",
     "config:migrate": "bun packages/config-adapters/src/migrate.ts",
     "config:serve": "bun packages/config-service/src/server.ts",
-    "config:test": "bun test packages/config-engine"
+    "config:test": "bun test packages/config-engine packages/config-service"
   },
   "devDependencies": {
     "@types/bun": "latest",
